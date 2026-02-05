@@ -1,3 +1,9 @@
+// ===================================================================
+// PROTEGMAIS BACKEND PROXY - VERSAO FINAL COM FINGERPRINT FIX
+// Data: 2026-02-05
+// Autor: GenSpark AI
+// ===================================================================
+
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -57,14 +63,7 @@ async function initSession() {
             console.log('==> CSRF Token obtido');
         }
 
-        // Extract fingerprint
-        const fingerprintMatch = html.match(/window\.livewire_app_url\s*=\s*'([^']+)'/);
-        if (fingerprintMatch) {
-            session.fingerprint = fingerprintMatch[1];
-            console.log('==> Fingerprint obtido');
-        }
-
-        // Extract Livewire data
+        // Extract Livewire data FIRST (to get fingerprint from it)
         console.log('==> Procurando dados Livewire...');
         
         let livewireData = null;
@@ -82,7 +81,34 @@ async function initSession() {
             }
         }
 
-        // Fallback to hardcoded brands
+        // Extract fingerprint from multiple sources
+        let fingerprint = null;
+        
+        // Try 1: From livewireData
+        if (livewireData?.fingerprint?.id) {
+            fingerprint = livewireData.fingerprint.id;
+            console.log('==> Fingerprint extraido do Livewire data');
+        }
+        
+        // Try 2: window.livewire_app_url
+        if (!fingerprint) {
+            const fingerprintMatch = html.match(/window\.livewire_app_url\s*=\s*'([^']+)'/);
+            if (fingerprintMatch) {
+                fingerprint = fingerprintMatch[1];
+                console.log('==> Fingerprint obtido via window.livewire_app_url');
+            }
+        }
+        
+        // Try 3: Generate default
+        if (!fingerprint) {
+            fingerprint = 'protegmais-' + Date.now();
+            console.log('==> AVISO: Fingerprint gerado automaticamente');
+        }
+        
+        session.fingerprint = fingerprint;
+        console.log(`==> Fingerprint final: ${fingerprint.substring(0, 30)}...`);
+
+        // Fallback to hardcoded brands if needed
         if (!livewireData || !livewireData.serverMemo?.data?.brands) {
             console.log('==> AVISO: Usando marcas hardcoded como fallback');
             livewireData = {
@@ -197,7 +223,7 @@ app.get('/api/clubfix/brands', async (req, res) => {
     }
 });
 
-// Get models for a brand - COM LOGS DETALHADOS
+// Get models for a brand - COM LOGS DETALHADOS E FINGERPRINT FIX
 app.post('/api/clubfix/brands/:id/models', async (req, res) => {
     const brandId = parseInt(req.params.id);
     
@@ -223,7 +249,7 @@ app.post('/api/clubfix/brands/:id/models', async (req, res) => {
             cache.models = {};
         }
 
-        // Check session
+        // Check session - SE FALTAR FINGERPRINT, REINICIALIZAR
         if (!session.csrfToken || !session.fingerprint) {
             console.log('==> AVISO: Sessao invalida, reinicializando...');
             await initSession();
@@ -234,16 +260,26 @@ app.post('/api/clubfix/brands/:id/models', async (req, res) => {
         console.log(`    Fingerprint: ${session.fingerprint ? 'OK' : 'FALTANDO'}`);
         console.log(`    Cookies: ${session.cookies.length}`);
 
+        // IMPORTANTE: Verificar novamente depois de reinicializar
+        if (!session.fingerprint) {
+            throw new Error('Fingerprint nao disponivel mesmo apos reinicializacao');
+        }
+
+        // Prepare fingerprint data
+        const fingerprintData = {
+            id: session.fingerprint,
+            name: 'subscription-form',
+            locale: 'pt_BR',
+            path: '/assinar/parceiro/clubtech',
+            method: 'GET',
+            v: 'acj'
+        };
+        
+        console.log(`==> Fingerprint enviado: ${fingerprintData.id.substring(0, 30)}...`);
+
         // Livewire request
         const livewirePayload = {
-            fingerprint: {
-                id: session.fingerprint || 'default',
-                name: 'subscription-form',
-                locale: 'pt_BR',
-                path: '/assinar/parceiro/clubtech',
-                method: 'GET',
-                v: 'acj'
-            },
+            fingerprint: fingerprintData,
             serverMemo: session.serverMemo,
             updates: [
                 {
@@ -291,10 +327,15 @@ app.post('/api/clubfix/brands/:id/models', async (req, res) => {
             console.log(`==> SUCESSO! Encontrados ${models.length} modelos em serverMemo.data.models`);
         } else if (response.data.effects?.returns) {
             console.log('==> Tentando extrair de effects.returns...');
-            console.log(`==> effects.returns:`, JSON.stringify(response.data.effects.returns).substring(0, 200));
+            const returns = response.data.effects.returns;
+            console.log(`==> effects.returns type:`, typeof returns);
+            console.log(`==> effects.returns:`, JSON.stringify(returns).substring(0, 200));
         } else {
             console.log('==> AVISO: Estrutura de resposta desconhecida');
             console.log(`==> Chaves disponiveis:`, Object.keys(response.data));
+            if (response.data.effects) {
+                console.log(`==> effects keys:`, Object.keys(response.data.effects));
+            }
         }
 
         if (!models || models.length === 0) {
@@ -332,8 +373,11 @@ app.post('/api/clubfix/brands/:id/models', async (req, res) => {
         console.error('='.repeat(60));
         console.error('==> ERRO AO BUSCAR MODELOS');
         console.error(`==> Mensagem: ${error.message}`);
-        console.error(`==> Status: ${error.response?.status}`);
-        console.error(`==> Data: ${JSON.stringify(error.response?.data || {}).substring(0, 200)}`);
+        if (error.response) {
+            console.error(`==> Status: ${error.response.status}`);
+            console.error(`==> StatusText: ${error.response.statusText}`);
+            console.error(`==> Data: ${JSON.stringify(error.response.data || {}).substring(0, 300)}`);
+        }
         console.error('='.repeat(60));
         console.error('');
         
@@ -358,6 +402,7 @@ app.get('/api/clubfix/session', (req, res) => {
         active: session.csrfToken !== null,
         lastUpdate: session.lastUpdate,
         hasFingerprint: session.fingerprint !== null,
+        fingerprint: session.fingerprint ? session.fingerprint.substring(0, 30) + '...' : null,
         cookiesCount: session.cookies.length
     });
 });
@@ -366,7 +411,7 @@ app.get('/api/clubfix/session', (req, res) => {
 app.listen(PORT, async () => {
     console.log('');
     console.log('='.repeat(60));
-    console.log('==> ClubFix Proxy Server INICIADO');
+    console.log('==> ClubFix Proxy Server INICIADO - VERSAO FINAL');
     console.log(`==> Porta: ${PORT}`);
     console.log('='.repeat(60));
     console.log('');
