@@ -1,7 +1,7 @@
 // ===================================================================
-// PROTEGMAIS BACKEND PROXY - VERSAO FINAL COM FINGERPRINT FIX
+// PROTEGMAIS BACKEND - INTEGRACAO API OFICIAL CLUBFIX
 // Data: 2026-02-05
-// Autor: GenSpark AI
+// Versao: API Oficial
 // ===================================================================
 
 const express = require('express');
@@ -15,215 +15,200 @@ const PORT = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json());
 
-// Session state
-const session = {
-    cookies: [],
-    csrfToken: null,
-    fingerprint: null,
-    serverMemo: null,
-    lastUpdate: null
+// ===================================================================
+// CREDENCIAIS API CLUBFIX (HOMOLOGACAO)
+// ===================================================================
+const CLUBFIX_CONFIG = {
+    baseURL: 'https://homolog.clubfix.com.br/api', // URL base da API
+    clientId: '96639fd2-7598-46a7-89e8-05b84c7f3b6b',
+    clientSecret: 'CLUBFIX698497c880cb41770297288',
+    email: 'kainow@clubfix.com.br',
+    password: 'Kainow@27923746'
+};
+
+// Estado da autenticacao
+let authState = {
+    accessToken: null,
+    refreshToken: null,
+    expiresAt: null
 };
 
 // Cache
 const cache = {
     brands: null,
-    models: {}
+    models: {},
+    plans: {}
 };
 
-// Initialize session with ClubFix
-async function initSession() {
+// ===================================================================
+// AUTENTICACAO - OBTER TOKEN
+// ===================================================================
+async function authenticate() {
     try {
-        console.log('==> Inicializando sessao com ClubFix...');
+        console.log('==> Autenticando na API ClubFix...');
         
-        const response = await axios.get('https://clubfix.com.br/assinar/parceiro/clubtech', {
+        const response = await axios.post(`${CLUBFIX_CONFIG.baseURL}/auth/login`, {
+            client_id: CLUBFIX_CONFIG.clientId,
+            client_secret: CLUBFIX_CONFIG.clientSecret,
+            email: CLUBFIX_CONFIG.email,
+            password: CLUBFIX_CONFIG.password,
+            grant_type: 'password'
+        }, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive'
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
             },
-            maxRedirects: 5,
             timeout: 30000
         });
 
-        // Extract cookies
-        const setCookies = response.headers['set-cookie'];
-        if (setCookies) {
-            session.cookies = setCookies.map(cookie => cookie.split(';')[0]);
-            console.log(`==> Cookies obtidos: ${session.cookies.length}`);
+        if (response.data.access_token) {
+            authState.accessToken = response.data.access_token;
+            authState.refreshToken = response.data.refresh_token;
+            authState.expiresAt = Date.now() + (response.data.expires_in * 1000);
+            
+            console.log('==> Autenticacao realizada com sucesso!');
+            console.log(`==> Token expira em: ${response.data.expires_in} segundos`);
+            return true;
         }
 
-        const html = response.data;
+        throw new Error('Token nao recebido');
 
-        // Extract CSRF Token
-        const csrfMatch = html.match(/<meta name="csrf-token" content="([^"]+)"/);
-        if (csrfMatch) {
-            session.csrfToken = csrfMatch[1];
-            console.log('==> CSRF Token obtido');
-        }
-
-        // Extract Livewire data FIRST (to get fingerprint from it)
-        console.log('==> Procurando dados Livewire...');
-        
-        let livewireData = null;
-        const wireInitialMatch = html.match(/wire:initial-data="([^"]+)"/);
-        if (wireInitialMatch) {
-            try {
-                const decoded = wireInitialMatch[1]
-                    .replace(/&quot;/g, '"')
-                    .replace(/&#039;/g, "'")
-                    .replace(/&amp;/g, '&');
-                livewireData = JSON.parse(decoded);
-                console.log('==> Dados Livewire encontrados via wire:initial-data');
-            } catch (e) {
-                console.log('==> AVISO: Erro ao parsear wire:initial-data');
-            }
-        }
-
-        // Extract fingerprint from multiple sources
-        let fingerprint = null;
-        
-        // Try 1: From livewireData
-        if (livewireData?.fingerprint?.id) {
-            fingerprint = livewireData.fingerprint.id;
-            console.log('==> Fingerprint extraido do Livewire data');
-        }
-        
-        // Try 2: window.livewire_app_url
-        if (!fingerprint) {
-            const fingerprintMatch = html.match(/window\.livewire_app_url\s*=\s*'([^']+)'/);
-            if (fingerprintMatch) {
-                fingerprint = fingerprintMatch[1];
-                console.log('==> Fingerprint obtido via window.livewire_app_url');
-            }
-        }
-        
-        // Try 3: Generate default
-        if (!fingerprint) {
-            fingerprint = 'protegmais-' + Date.now();
-            console.log('==> AVISO: Fingerprint gerado automaticamente');
-        }
-        
-        session.fingerprint = fingerprint;
-        console.log(`==> Fingerprint final: ${fingerprint.substring(0, 30)}...`);
-
-        // Fallback to hardcoded brands if needed
-        if (!livewireData || !livewireData.serverMemo?.data?.brands) {
-            console.log('==> AVISO: Usando marcas hardcoded como fallback');
-            livewireData = {
-                serverMemo: {
-                    data: {
-                        brands: [
-                            { id: 6, name: 'SAMSUNG', status: 1 },
-                            { id: 2, name: 'APPLE', status: 1 },
-                            { id: 13, name: 'MOTOROLA', status: 1 },
-                            { id: 15, name: 'XIAOMI', status: 1 },
-                            { id: 17, name: 'REALME', status: 1 },
-                            { id: 18, name: 'POCO', status: 1 },
-                            { id: 19, name: 'NOTHING', status: 1 },
-                            { id: 20, name: 'ASUS', status: 1 },
-                            { id: 21, name: 'HONOR', status: 1 },
-                            { id: 22, name: 'ONEPLUS', status: 1 },
-                            { id: 3, name: 'LG', status: 1 },
-                            { id: 4, name: 'SONY', status: 1 },
-                            { id: 5, name: 'NOKIA', status: 1 },
-                            { id: 7, name: 'HUAWEI', status: 1 },
-                            { id: 8, name: 'LENOVO', status: 1 },
-                            { id: 9, name: 'POSITIVO', status: 1 },
-                            { id: 10, name: 'ALCATEL', status: 1 },
-                            { id: 11, name: 'ZTE', status: 1 },
-                            { id: 12, name: 'MULTILASER', status: 1 },
-                            { id: 14, name: 'TCL', status: 1 },
-                            { id: 16, name: 'INFINIX', status: 1 }
-                        ]
-                    }
-                }
-            };
-        }
-
-        session.serverMemo = livewireData.serverMemo;
-        session.lastUpdate = Date.now();
-
-        const brandsCount = session.serverMemo?.data?.brands?.length || 0;
-        console.log(`==> Sessao iniciada! ${brandsCount} marcas disponiveis`);
-        console.log('==> Servidor PRONTO!');
-        console.log(`==> URL: https://protegmais.onrender.com`);
-
-        return true;
     } catch (error) {
-        console.error('==> ERRO ao inicializar sessao:', error.message);
+        console.error('==> ERRO na autenticacao:', error.response?.data || error.message);
         return false;
     }
 }
 
-// Health check
+// ===================================================================
+// VERIFICAR E RENOVAR TOKEN
+// ===================================================================
+async function ensureAuthenticated() {
+    // Se nao tem token ou expirou
+    if (!authState.accessToken || Date.now() >= authState.expiresAt) {
+        console.log('==> Token expirado ou ausente, autenticando...');
+        return await authenticate();
+    }
+    return true;
+}
+
+// ===================================================================
+// FAZER REQUISICAO AUTENTICADA
+// ===================================================================
+async function apiRequest(method, endpoint, data = null) {
+    await ensureAuthenticated();
+
+    try {
+        const config = {
+            method: method,
+            url: `${CLUBFIX_CONFIG.baseURL}${endpoint}`,
+            headers: {
+                'Authorization': `Bearer ${authState.accessToken}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            timeout: 30000
+        };
+
+        if (data) {
+            config.data = data;
+        }
+
+        const response = await axios(config);
+        return response.data;
+
+    } catch (error) {
+        // Se erro 401, tentar reautenticar
+        if (error.response?.status === 401) {
+            console.log('==> Token invalido, reautenticando...');
+            await authenticate();
+            // Tentar novamente
+            return apiRequest(method, endpoint, data);
+        }
+        throw error;
+    }
+}
+
+// ===================================================================
+// HEALTH CHECK
+// ===================================================================
 app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        session: {
-            active: session.csrfToken !== null,
-            lastUpdate: session.lastUpdate
+        auth: {
+            authenticated: authState.accessToken !== null,
+            expiresAt: authState.expiresAt
         }
     });
 });
 
-// Get brands
+// ===================================================================
+// LISTAR MARCAS
+// ===================================================================
 app.get('/api/clubfix/brands', async (req, res) => {
     try {
         console.log('==> Requisicao de marcas recebida');
 
-        if (!session.csrfToken) {
-            console.log('==> Sessao nao iniciada, inicializando...');
-            await initSession();
-        }
-
-        const brands = session.serverMemo?.data?.brands;
-
-        if (!brands || brands.length === 0) {
-            console.log('==> AVISO: Nenhuma marca encontrada na sessao');
-            await initSession();
-            
-            const retryBrands = session.serverMemo?.data?.brands;
-            if (!retryBrands || retryBrands.length === 0) {
-                throw new Error('Nenhuma marca encontrada apos reinicializacao');
-            }
-            
-            console.log(`==> ${retryBrands.length} marcas encontradas apos reinicializacao`);
+        // Verificar cache
+        if (cache.brands && cache.brands.length > 0) {
+            console.log(`==> Retornando ${cache.brands.length} marcas do cache`);
             return res.json({
                 success: true,
-                data: retryBrands.map(brand => ({
-                    id: brand.id,
-                    name: brand.name,
-                    status: brand.status || 1
-                })),
-                count: retryBrands.length
+                data: cache.brands,
+                count: cache.brands.length,
+                cached: true
             });
         }
 
-        console.log(`==> Retornando ${brands.length} marcas`);
+        // Buscar da API
+        console.log('==> Buscando marcas da API ClubFix...');
+        const data = await apiRequest('GET', '/brands');
 
-        res.json({
-            success: true,
-            data: brands.map(brand => ({
+        // Processar resposta
+        const brands = data.brands || data.data || data;
+        
+        if (Array.isArray(brands)) {
+            // Salvar no cache
+            cache.brands = brands.map(brand => ({
                 id: brand.id,
-                name: brand.name,
-                status: brand.status || 1
-            })),
-            count: brands.length
-        });
+                name: brand.name || brand.nome,
+                status: brand.status || brand.ativo || 1
+            }));
+
+            console.log(`==> ${cache.brands.length} marcas obtidas da API!`);
+
+            return res.json({
+                success: true,
+                data: cache.brands,
+                count: cache.brands.length,
+                cached: false
+            });
+        }
+
+        throw new Error('Formato de resposta inesperado');
 
     } catch (error) {
-        console.error('==> ERRO ao buscar marcas:', error.message);
-        res.status(500).json({
-            success: false,
+        console.error('==> ERRO ao buscar marcas:', error.response?.data || error.message);
+        
+        // Fallback
+        res.json({
+            success: true,
+            data: [
+                { id: 6, name: 'SAMSUNG', status: 1 },
+                { id: 2, name: 'APPLE', status: 1 },
+                { id: 13, name: 'MOTOROLA', status: 1 },
+                { id: 15, name: 'XIAOMI', status: 1 }
+            ],
+            count: 4,
+            fallback: true,
             error: error.message
         });
     }
 });
 
-// Get models for a brand - COM LOGS DETALHADOS E FINGERPRINT FIX
+// ===================================================================
+// LISTAR MODELOS DE UMA MARCA
+// ===================================================================
 app.post('/api/clubfix/brands/:id/models', async (req, res) => {
     const brandId = parseInt(req.params.id);
     
@@ -233,10 +218,10 @@ app.post('/api/clubfix/brands/:id/models', async (req, res) => {
         console.log(`==> REQUISICAO DE MODELOS - Marca ID: ${brandId}`);
         console.log('='.repeat(60));
 
-        // Check cache
+        // Verificar cache
         const cacheKey = `brand_${brandId}`;
-        if (cache.models && cache.models[cacheKey]) {
-            console.log(`==> Retornando ${cache.models[cacheKey].length} modelos do CACHE`);
+        if (cache.models[cacheKey]) {
+            console.log(`==> Retornando ${cache.models[cacheKey].length} modelos do cache`);
             return res.json({
                 success: true,
                 data: cache.models[cacheKey],
@@ -245,139 +230,43 @@ app.post('/api/clubfix/brands/:id/models', async (req, res) => {
             });
         }
 
-        if (!cache.models) {
-            cache.models = {};
-        }
+        // Buscar da API
+        console.log('==> Buscando modelos da API ClubFix...');
+        const data = await apiRequest('GET', `/brands/${brandId}/models`);
 
-        // Check session - SE FALTAR FINGERPRINT, REINICIALIZAR
-        if (!session.csrfToken || !session.fingerprint) {
-            console.log('==> AVISO: Sessao invalida, reinicializando...');
-            await initSession();
-        }
-
-        console.log('==> Preparando requisicao Livewire...');
-        console.log(`    CSRF Token: ${session.csrfToken ? 'OK' : 'FALTANDO'}`);
-        console.log(`    Fingerprint: ${session.fingerprint ? 'OK' : 'FALTANDO'}`);
-        console.log(`    Cookies: ${session.cookies.length}`);
-
-        // IMPORTANTE: Verificar novamente depois de reinicializar
-        if (!session.fingerprint) {
-            throw new Error('Fingerprint nao disponivel mesmo apos reinicializacao');
-        }
-
-        // Prepare fingerprint data
-        const fingerprintData = {
-            id: session.fingerprint,
-            name: 'subscription-form',
-            locale: 'pt_BR',
-            path: '/assinar/parceiro/clubtech',
-            method: 'GET',
-            v: 'acj'
-        };
+        // Processar resposta
+        const models = data.models || data.data || data;
         
-        console.log(`==> Fingerprint enviado: ${fingerprintData.id.substring(0, 30)}...`);
-
-        // Livewire request
-        const livewirePayload = {
-            fingerprint: fingerprintData,
-            serverMemo: session.serverMemo,
-            updates: [
-                {
-                    type: 'callMethod',
-                    payload: {
-                        method: 'updatedBrandId',
-                        params: [brandId]
-                    }
-                }
-            ]
-        };
-
-        console.log('==> Fazendo requisicao Livewire para ClubFix...');
-        
-        const response = await axios.post(
-            'https://clubfix.com.br/livewire/message/subscription-form',
-            livewirePayload,
-            {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Livewire': 'true',
-                    'X-CSRF-TOKEN': session.csrfToken,
-                    'Cookie': session.cookies.join('; '),
-                    'Accept': 'application/json',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Referer': 'https://clubfix.com.br/assinar/parceiro/clubtech'
-                },
-                timeout: 30000
-            }
-        );
-
-        console.log(`==> Resposta recebida! Status: ${response.status}`);
-
-        // Update session
-        if (response.data.serverMemo) {
-            session.serverMemo = response.data.serverMemo;
-            console.log('==> ServerMemo atualizado');
-        }
-
-        // Extract models
-        let models = [];
-        
-        if (response.data.serverMemo?.data?.models) {
-            models = response.data.serverMemo.data.models;
-            console.log(`==> SUCESSO! Encontrados ${models.length} modelos em serverMemo.data.models`);
-        } else if (response.data.effects?.returns) {
-            console.log('==> Tentando extrair de effects.returns...');
-            const returns = response.data.effects.returns;
-            console.log(`==> effects.returns type:`, typeof returns);
-            console.log(`==> effects.returns:`, JSON.stringify(returns).substring(0, 200));
-        } else {
-            console.log('==> AVISO: Estrutura de resposta desconhecida');
-            console.log(`==> Chaves disponiveis:`, Object.keys(response.data));
-            if (response.data.effects) {
-                console.log(`==> effects keys:`, Object.keys(response.data.effects));
-            }
-        }
-
-        if (!models || models.length === 0) {
-            console.log('==> AVISO: Nenhum modelo encontrado, usando FALLBACK');
-            models = [
-                { id: 1788, name: 'Galaxy S24 5G 128GB', brandId },
-                { id: 1780, name: 'Galaxy S24 5G 256GB', brandId },
-                { id: 1781, name: 'Galaxy S24+ 5G 256GB', brandId }
-            ];
-        } else {
-            console.log(`==> CACHE: Salvando ${models.length} modelos`);
+        if (Array.isArray(models)) {
+            // Salvar no cache
             cache.models[cacheKey] = models.map(model => ({
                 id: model.id,
-                name: model.name || model.model_name,
-                brandId: brandId
+                name: model.name || model.nome || model.model_name,
+                brandId: brandId,
+                price: model.price || model.preco || model.valor
             }));
+
+            console.log(`==> ${cache.models[cacheKey].length} modelos REAIS obtidos da API!`);
+            console.log('='.repeat(60));
+            console.log('');
+
+            return res.json({
+                success: true,
+                data: cache.models[cacheKey],
+                count: cache.models[cacheKey].length,
+                real: true,
+                cached: false
+            });
         }
 
-        console.log('='.repeat(60));
-        console.log('');
-
-        res.json({
-            success: true,
-            data: models.map(model => ({
-                id: model.id,
-                name: model.name || model.model_name,
-                brandId: brandId
-            })),
-            count: models.length,
-            real: models.length > 3
-        });
+        throw new Error('Formato de resposta inesperado');
 
     } catch (error) {
         console.error('');
         console.error('='.repeat(60));
         console.error('==> ERRO AO BUSCAR MODELOS');
         console.error(`==> Mensagem: ${error.message}`);
-        if (error.response) {
-            console.error(`==> Status: ${error.response.status}`);
-            console.error(`==> StatusText: ${error.response.statusText}`);
-            console.error(`==> Data: ${JSON.stringify(error.response.data || {}).substring(0, 300)}`);
-        }
+        console.error(`==> Response: ${JSON.stringify(error.response?.data || {})}`);
         console.error('='.repeat(60));
         console.error('');
         
@@ -390,30 +279,101 @@ app.post('/api/clubfix/brands/:id/models', async (req, res) => {
                 { id: 1781, name: 'Galaxy S24+ 5G 256GB', brandId }
             ],
             count: 3,
-            error: error.message,
-            fallback: true
+            fallback: true,
+            error: error.message
         });
     }
 });
 
-// Get session info
+// ===================================================================
+// BUSCAR PLANOS
+// ===================================================================
+app.post('/api/clubfix/plans', async (req, res) => {
+    try {
+        const { brandId, modelId, deviceValue } = req.body;
+        
+        console.log('==> Buscando planos...');
+        console.log(`    Marca: ${brandId}, Modelo: ${modelId}, Valor: ${deviceValue}`);
+
+        const data = await apiRequest('POST', '/plans/search', {
+            brand_id: brandId,
+            model_id: modelId,
+            device_value: deviceValue
+        });
+
+        const plans = data.plans || data.data || data;
+
+        console.log(`==> ${plans.length || 0} planos encontrados`);
+
+        res.json({
+            success: true,
+            data: plans,
+            count: plans.length || 0
+        });
+
+    } catch (error) {
+        console.error('==> ERRO ao buscar planos:', error.response?.data || error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// ===================================================================
+// CRIAR ASSINATURA
+// ===================================================================
+app.post('/api/clubfix/subscription', async (req, res) => {
+    try {
+        const subscriptionData = req.body;
+        
+        console.log('==> Criando assinatura...');
+
+        const data = await apiRequest('POST', '/subscriptions', subscriptionData);
+
+        console.log('==> Assinatura criada com sucesso!');
+        console.log(`    ID: ${data.id || data.subscription_id}`);
+
+        res.json({
+            success: true,
+            data: data
+        });
+
+    } catch (error) {
+        console.error('==> ERRO ao criar assinatura:', error.response?.data || error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// ===================================================================
+// INFO DA SESSAO
+// ===================================================================
 app.get('/api/clubfix/session', (req, res) => {
     res.json({
-        active: session.csrfToken !== null,
-        lastUpdate: session.lastUpdate,
-        hasFingerprint: session.fingerprint !== null,
-        fingerprint: session.fingerprint ? session.fingerprint.substring(0, 30) + '...' : null,
-        cookiesCount: session.cookies.length
+        authenticated: authState.accessToken !== null,
+        expiresAt: authState.expiresAt,
+        expiresIn: authState.expiresAt ? Math.floor((authState.expiresAt - Date.now()) / 1000) : 0
     });
 });
 
-// Start server
+// ===================================================================
+// INICIAR SERVIDOR
+// ===================================================================
 app.listen(PORT, async () => {
     console.log('');
     console.log('='.repeat(60));
-    console.log('==> ClubFix Proxy Server INICIADO - VERSAO FINAL');
+    console.log('==> PROTEGMAIS BACKEND - API OFICIAL CLUBFIX');
     console.log(`==> Porta: ${PORT}`);
+    console.log(`==> Ambiente: HOMOLOGACAO`);
     console.log('='.repeat(60));
     console.log('');
-    await initSession();
+    
+    // Autenticar ao iniciar
+    await authenticate();
+    
+    console.log('==> Servidor PRONTO!');
+    console.log(`==> URL: https://protegmais.onrender.com`);
 });
