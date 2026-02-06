@@ -174,10 +174,21 @@ app.get('/api/clubfix/brands', async (req, res) => {
     
     console.log('==> Buscando marcas da API ClubFix...');
     
+    // Força buscar todas as marcas (per_page=100)
     const { page, per_page } = req.query;
-    const response = await makeAuthenticatedRequest('GET', '/brands', null, { page, per_page });
+    const params = { 
+      page: page || 1, 
+      per_page: per_page || 100  // Busca até 100 marcas por padrão
+    };
+    
+    console.log(`==> Parametros: page=${params.page}, per_page=${params.per_page}`);
+    
+    const response = await makeAuthenticatedRequest('GET', '/brands', null, params);
     
     const brands = response.data.data || response.data;
+    
+    console.log(`==> API retornou: ${brands.length} marcas`);
+    console.log(`==> Total disponível: ${response.data.meta?.total || brands.length}`);
     
     // Salva no cache
     cache.brands = brands;
@@ -796,6 +807,64 @@ app.get('/api/clubfix/session', (req, res) => {
     authenticated: !!authToken.access_token,
     tokenValid: authToken.access_token && Date.now() < authToken.expires_at,
     expiresIn: authToken.expires_at ? Math.floor((authToken.expires_at - Date.now()) / 1000) : 0
+  });
+});
+
+// ============================================================
+// ENDPOINT DE CACHE
+// ============================================================
+
+/**
+ * POST /api/cache/clear - Limpar cache do servidor
+ */
+app.post('/api/cache/clear', (req, res) => {
+  console.log('='.repeat(60));
+  console.log('==> LIMPANDO CACHE DO SERVIDOR');
+  console.log('='.repeat(60));
+  
+  const oldCache = {
+    brands: cache.brands ? cache.brands.length : 0,
+    models: Object.keys(cache.models).length,
+    plans: !!cache.plans,
+    lastUpdate: cache.lastUpdate
+  };
+  
+  // Limpa todo o cache
+  cache.brands = null;
+  cache.models = {};
+  cache.plans = null;
+  cache.lastUpdate = null;
+  
+  console.log('==> ✅ CACHE LIMPO COM SUCESSO!');
+  console.log(`==> Marcas em cache: ${oldCache.brands} → 0`);
+  console.log(`==> Modelos em cache: ${oldCache.models} → 0`);
+  console.log('='.repeat(60));
+  
+  res.json({
+    success: true,
+    message: 'Cache limpo com sucesso!',
+    oldCache,
+    newCache: {
+      brands: 0,
+      models: 0,
+      plans: false
+    }
+  });
+});
+
+/**
+ * GET /api/cache/status - Ver status do cache
+ */
+app.get('/api/cache/status', (req, res) => {
+  res.json({
+    success: true,
+    cache: {
+      brands: cache.brands ? cache.brands.length : 0,
+      models: Object.keys(cache.models).length,
+      plans: !!cache.plans,
+      lastUpdate: cache.lastUpdate,
+      age: cache.lastUpdate ? Math.floor((Date.now() - cache.lastUpdate) / 1000) : null
+    }
   });
 });
 
