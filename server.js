@@ -1,32 +1,34 @@
 /**
- * ProtegMais Backend - API OFICIAL CLUBFIX
- * VERSÃO 16.2 - FIX BRANDS PAGINATION
- * 
- * ⚠️ CREDENCIAIS DE PRODUÇÃO CONFIGURADAS
- * ⚠️ Usa apenas ambiente de PRODUÇÃO (sem fallback)
+ * ProtegMais - Backend API Oficial ClubFix
+ * Versão: 16.2 - PRODUÇÃO ATIVA
  * 
  * CHANGELOG v16.2:
- * 🔧 FIX: Buscar TODAS as marcas com limit=100
- *    - Antes: GET /brands → Retornava apenas 9 marcas (paginação padrão)
- *    - Depois: GET /brands?limit=100 → Retorna todas as marcas disponíveis
+ * - Fix: buscar TODAS as marcas com limit=100
+ * - Antes: GET /brands retornava apenas ~9 marcas (paginação padrão)
+ * - Depois: GET /brands?limit=100 retorna 25+ marcas
  * 
  * CHANGELOG v16.1:
- * 🔧 FIX: Endpoint de modelos corrigido
- *    - Antes: POST /api/clubfix/brands/:id/models → 404 Error
- *    - Depois: GET /api/clubfix/models/:brandId → ✅ Funcionando
- *    - API ClubFix usa GET /brands/:id que retorna brand.models
+ * - Fix: endpoint de modelos corrigido
+ * - Antes: POST /api/clubfix/brands/:id/models → 404 (endpoint não existe)
+ * - Depois: GET /api/clubfix/models/:brandId → ✅ Funcionando
+ * - ClubFix API usa GET /brands/:id que retorna { data: { ...brand, models: [...] } }
  * 
  * Funcionalidades:
- * ✅ Autenticação OAuth2
- * ✅ Marcas e Modelos de Dispositivos (TODAS, sem paginação)
- * ✅ Planos de Assinatura
- * ✅ Cotações (Quotation)
- * ✅ Assinaturas (Subscriptions)
- * ✅ Pagamentos
- * ✅ Planos Anuais (Annual Plans)
- * ✅ Clientes (Customers)
- * ✅ Lojistas (Shopkeepers)
- * ✅ Cache inteligente
+ * - Autenticação OAuth2
+ * - Marcas e Modelos de dispositivos (TODAS, sem paginação)
+ * - Planos de assinatura
+ * - Cotações
+ * - Assinaturas
+ * - Pagamentos
+ * - Planos anuais
+ * - Clientes
+ * - Lojistas
+ * - Cache inteligente
+ * 
+ * Tecnologias: Express, Axios, CORS
+ * 
+ * IMPORTANTE: Este arquivo usa APENAS credenciais de PRODUÇÃO
+ * Ambiente forçado: PRODUÇÃO (sem fallback para homologação)
  */
 
 const express = require('express');
@@ -36,46 +38,133 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Middlewares
+// ============================================
+// CONFIGURAÇÃO - PRODUÇÃO ATIVA
+// ============================================
+
+const ENVIRONMENT = 'producao';
+
+const CLUBFIX_CONFIG = {
+  producao: {
+    baseURL: 'https://clubfix.com.br/webservice',
+    email: 'kainow@clubfix.com.br',
+    client_id: '2f6356ca-8089-4afc-aad8-c83b30ca1f3f',
+    client_secret: 'E>s_|aKA97qCF23M',
+    environment: 'PRODUCAO',
+    expectedBrands: '25+'
+  }
+};
+
+const CONFIG = CLUBFIX_CONFIG[ENVIRONMENT];
+
+console.log('\n' + '='.repeat(60));
+console.log('🚀 BACKEND PROTEGMAIS - VERSÃO 16.2 - PRODUÇÃO');
+console.log('='.repeat(60));
+console.log(`📍 URL Pública: https://protegmais.onrender.com`);
+console.log(`🔐 Credenciais de PRODUÇÃO configuradas`);
+console.log(`📧 E-mail: ${CONFIG.email}`);
+console.log(`🆔 Cliente ID: ${CONFIG.client_id}`);
+console.log(`🌐 ClubFix WebService: ${CONFIG.baseURL}`);
+console.log(`🏢 Ambiente: ${CONFIG.environment}`);
+console.log(`📦 Marcas esperadas: ${CONFIG.expectedBrands}`);
+console.log('='.repeat(60) + '\n');
+
+// ============================================
+// MIDDLEWARES
+// ============================================
+
 app.use(cors());
 app.use(express.json());
 
-// ============================================================
-// CONFIGURAÇÃO DA API CLUBFIX - PRODUÇÃO
-// ============================================================
+// ============================================
+// AUTENTICAÇÃO
+// ============================================
 
-const ENVIRONMENTS = {
-  PRODUCTION: {
-    baseURL: 'https://clubfix.com.br/webservice',
-    name: 'PRODUCAO',
-    expectedBrands: '25+'
-  },
-  HOMOLOGATION: {
-    baseURL: 'https://homolog.clubfix.com.br/webservice',
-    name: 'HOMOLOGACAO',
-    expectedBrands: '6'
+let authToken = null;
+
+async function authenticate() {
+  try {
+    console.log(`\n🔐 Autenticando com ClubFix...`);
+    console.log(`📧 E-mail: ${CONFIG.email}`);
+    console.log(`🔑 Client ID: ${CONFIG.client_id}`);
+
+    const response = await axios.post(
+      `${CONFIG.baseURL}/auth/login`,
+      {
+        email: CONFIG.email,
+        password: CONFIG.client_secret,
+        client_id: CONFIG.client_id
+      },
+      {
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+
+    if (response.data && response.data.data) {
+      authToken = {
+        access_token: response.data.data.access_token,
+        expires_at: response.data.data.expires_at
+      };
+
+      const expiresDate = new Date(authToken.expires_at);
+      console.log(`✅ Autenticação bem-sucedida!`);
+      console.log(`🎫 Token expira em: ${expiresDate.toLocaleString('pt-BR')}`);
+      console.log(`⏰ Válido até: ${expiresDate.toISOString()}`);
+
+      return authToken;
+    }
+
+    throw new Error('Resposta de autenticação inválida');
+  } catch (error) {
+    console.error('❌ Erro na autenticação:', error.response?.data || error.message);
+    throw error;
   }
-};
+}
 
-const CLUBFIX_CONFIG = {
-  baseURL: ENVIRONMENTS.PRODUCTION.baseURL,
-  environment: ENVIRONMENTS.PRODUCTION.name,
-  
-  credentials: {
-    email: 'kainow@clubfix.com.br',
-    password: 'Kainow@27923746',
-    client_id: '2f6356ca-8089-4afc-aad8-c83b30ca1f3f',
-    client_secret: 'CLUBFIX6986445f624d31770407007'
+function isTokenValid() {
+  if (!authToken || !authToken.expires_at) return false;
+  const now = new Date();
+  const expiresAt = new Date(authToken.expires_at);
+  return now < expiresAt;
+}
+
+async function ensureAuthenticated() {
+  if (!isTokenValid()) {
+    console.log('🔄 Token expirado ou inválido. Renovando...');
+    await authenticate();
   }
-};
+  return authToken.access_token;
+}
 
-// Token de autenticação
-const authToken = {
-  access_token: null,
-  expires_at: null
-};
+async function makeAuthenticatedRequest(method, endpoint, data = null) {
+  const token = await ensureAuthenticated();
 
-// Cache
+  const config = {
+    method,
+    url: `${CONFIG.baseURL}${endpoint}`,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+  };
+
+  if (data) {
+    config.data = data;
+  }
+
+  try {
+    const response = await axios(config);
+    return response.data;
+  } catch (error) {
+    console.error(`❌ Erro na requisição ${method} ${endpoint}:`, error.response?.data || error.message);
+    throw error;
+  }
+}
+
+// ============================================
+// CACHE
+// ============================================
+
 const cache = {
   brands: null,
   models: {},
@@ -83,213 +172,89 @@ const cache = {
   lastUpdate: null
 };
 
-// ============================================================
-// LOGGING
-// ============================================================
+// ============================================
+// ENDPOINTS - CLUBFIX API
+// ============================================
 
-function log(message, type = 'info') {
-  const timestamp = new Date().toISOString();
-  const prefix = {
-    info: '📍',
-    success: '✅',
-    error: '❌',
-    warning: '⚠️'
-  }[type] || 'ℹ️';
+// Health Check
+app.get('/health', async (req, res) => {
+  const authenticated = isTokenValid();
   
-  console.log(`[${timestamp}] ${prefix}${message}`);
-}
-
-// ============================================================
-// AUTENTICAÇÃO
-// ============================================================
-
-async function tryAuthenticateWithEnvironment(env) {
-  console.log('='.repeat(60));
-  console.log(`==> 🔧 Tentando ${env.name}...`);
-  console.log(`==> URL: ${env.baseURL}/auth/login`);
-  console.log(`==> 📤 Client ID: ${CLUBFIX_CONFIG.credentials.client_id}`);
-  
-  try {
-    const response = await axios.post(`${env.baseURL}/auth/login`, {
-      email: CLUBFIX_CONFIG.credentials.email,
-      password: CLUBFIX_CONFIG.credentials.password,
-      client_id: CLUBFIX_CONFIG.credentials.client_id,
-      client_secret: CLUBFIX_CONFIG.credentials.client_secret
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      }
-    });
-
-    const { access_token, expires_in } = response.data;
-    
-    // Sucesso! Configurar o ambiente
-    CLUBFIX_CONFIG.baseURL = env.baseURL;
-    CLUBFIX_CONFIG.environment = env.name;
-    
-    authToken.access_token = access_token;
-    authToken.expires_at = Date.now() + (expires_in * 1000);
-    
-    console.log('==> ✅ AUTENTICACAO REALIZADA COM SUCESSO!');
-    console.log(`==> Ambiente: ${env.name}`);
-    console.log(`==> URL Base: ${env.baseURL}`);
-    console.log(`==> Marcas Esperadas: ${env.expectedBrands}`);
-    console.log(`==> Token expira em: ${expires_in} segundos`);
-    console.log('='.repeat(60));
-    
-    return { success: true, environment: env };
-  } catch (error) {
-    console.error(`==> ❌ ${env.name} FALHOU!`);
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error(`==> Mensagem: ${error.response?.data?.message || error.message}`);
-    return { success: false, error: error.response?.data?.message || error.message };
-  }
-}
-
-async function authenticate() {
-  console.log('='.repeat(60));
-  console.log('==> 🚀 FORÇANDO AMBIENTE DE PRODUCAO');
-  console.log('='.repeat(60));
-  console.log('==> Email:', CLUBFIX_CONFIG.credentials.email);
-  console.log('==> Client ID:', CLUBFIX_CONFIG.credentials.client_id);
-  console.log('==> URL:', ENVIRONMENTS.PRODUCTION.baseURL);
-  console.log('='.repeat(60));
-  
-  // FORÇAR APENAS PRODUÇÃO (sem fallback)
-  const result = await tryAuthenticateWithEnvironment(ENVIRONMENTS.PRODUCTION);
-  
-  if (result.success) {
-    console.log('==> 🏆 PRODUCAO ATIVA! Sistema completo com 25+ marcas!');
-    console.log('='.repeat(60));
-    return true;
-  }
-  
-  // Se falhar, NÃO tenta homologação
-  console.error('='.repeat(60));
-  console.error('==> ❌ ERRO: Não foi possível autenticar em PRODUCAO!');
-  console.error('==> Motivo:', result.error);
-  console.error('==> Client ID:', CLUBFIX_CONFIG.credentials.client_id);
-  console.error('==> Verifique as credenciais de PRODUCAO');
-  console.error('='.repeat(60));
-  return false;
-}
-
-// ============================================================
-// HTTP REQUEST COM AUTENTICAÇÃO
-// ============================================================
-
-async function makeAuthenticatedRequest(method, endpoint, data = null) {
-  // Verificar se token está válido
-  if (!authToken.access_token || Date.now() >= authToken.expires_at) {
-    log('Token expirado, renovando...', 'warning');
-    await authenticate();
-  }
-  
-  const url = `${CLUBFIX_CONFIG.baseURL}${endpoint}`;
-  
-  try {
-    const config = {
-      method,
-      url,
-      headers: {
-        'Authorization': `Bearer ${authToken.access_token}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      }
-    };
-    
-    if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-      config.data = data;
-    }
-    
-    const response = await axios(config);
-    return response;
-  } catch (error) {
-    log(`Erro na requisição ${method} ${endpoint}: ${error.message}`, 'error');
-    throw error;
-  }
-}
-
-// ============================================================
-// HEALTH CHECK
-// ============================================================
-
-app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    environment: CLUBFIX_CONFIG.environment,
-    baseURL: CLUBFIX_CONFIG.baseURL,
-    authenticated: !!authToken.access_token,
-    tokenValid: authToken.expires_at && Date.now() < authToken.expires_at,
-    expectedBrands: ENVIRONMENTS.PRODUCTION.expectedBrands,
+    environment: CONFIG.environment,
+    baseURL: CONFIG.baseURL,
+    auth: {
+      authenticated,
+      tokenValid: authenticated
+    },
+    expectedBrands: CONFIG.expectedBrands,
     cache: {
       brands: cache.brands?.length || 0,
       models: Object.keys(cache.models).length,
       plans: !!cache.plans,
       lastUpdate: cache.lastUpdate
     },
-    message: '🏆 Ambiente de PRODUÇÃO ativo - 25+ marcas disponíveis!'
+    message: `🏆 Ambiente de ${CONFIG.environment} ativo - ${CONFIG.expectedBrands} marcas disponíveis!`
   });
 });
 
-// ============================================================
-// MARCAS
-// ============================================================
-
+// Listar TODAS as marcas (SEM paginação)
 app.get('/api/clubfix/brands', async (req, res) => {
-  log('LISTAGEM DE MARCAS');
-  
   try {
-    // Verificar cache
-    if (cache.brands) {
-      log(`Cache HIT: ${cache.brands.length} marcas`, 'success');
+    console.log('\n📱 LISTAGEM DE MARCAS');
+
+    // Cache hit
+    if (cache.brands && cache.lastUpdate) {
+      const cacheAge = Date.now() - new Date(cache.lastUpdate).getTime();
+      if (cacheAge < 3600000) { // 1 hora
+        console.log(`✅ Retornando marcas do cache (${cache.brands.length} marcas)`);
+        return res.json({
+          success: true,
+          data: cache.brands,
+          count: cache.brands.length,
+          cached: true
+        });
+      }
+    }
+
+    // Buscar TODAS as marcas com limit=100
+    const response = await makeAuthenticatedRequest('GET', '/brands?limit=100');
+
+    if (response && response.data) {
+      cache.brands = response.data;
+      cache.lastUpdate = new Date().toISOString();
+
+      console.log(`✅ MARCAS carregadas: ${response.data.length}`);
+
       return res.json({
         success: true,
-        data: cache.brands,
-        count: cache.brands.length,
-        cached: true
+        data: response.data,
+        count: response.data.length,
+        cached: false
       });
     }
-    
-    // Buscar com parâmetro limit alto para pegar todas as marcas
-    const response = await makeAuthenticatedRequest('GET', '/brands?limit=100');
-    
-    // Atualizar cache
-    cache.brands = response.data.data;
-    cache.lastUpdate = new Date().toISOString();
-    
-    log(`MARCAS carregadas: ${response.data.data.length}`, 'success');
-    
-    res.json({
-      success: true,
-      data: response.data.data,
-      count: response.data.data.length,
-      cached: false
-    });
-    
+
+    throw new Error('Resposta inválida da API ClubFix');
   } catch (error) {
-    log(`ERRO AO LISTAR MARCAS: ${error.message}`, 'error');
-    res.status(error.response?.status || 500).json({
+    console.error('❌ Erro ao buscar marcas:', error.response?.data || error.message);
+    res.status(500).json({
       success: false,
-      error: error.response?.data?.message || error.message
+      error: error.response?.data || error.message
     });
   }
 });
 
-// ============================================================
-// MODELOS
-// ============================================================
-
+// Listar modelos de uma marca
 app.get('/api/clubfix/models/:brandId', async (req, res) => {
-  const brandId = req.params.brandId;
-  log(`LISTAGEM DE MODELOS - Marca ID: ${brandId}`);
-  
   try {
-    // Verificar cache
+    const { brandId } = req.params;
+    console.log(`\n📱 LISTAGEM DE MODELOS - Marca ID: ${brandId}`);
+
+    // Cache hit
     if (cache.models[brandId]) {
-      log(`Cache HIT: ${cache.models[brandId].length} modelos da marca ${brandId}`, 'success');
+      console.log(`✅ Retornando modelos do cache (${cache.models[brandId].length} modelos)`);
       return res.json({
         success: true,
         data: cache.models[brandId],
@@ -297,143 +262,111 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
         cached: true
       });
     }
-    
+
+    // ClubFix API: GET /brands/:id retorna { data: { ...brand, models: [...] } }
     const response = await makeAuthenticatedRequest('GET', `/brands/${brandId}`);
-    
-    // A resposta da API ClubFix retorna a marca com seus modelos
-    const brandData = response.data.data;
-    const models = brandData.models || [];
-    
-    // Atualizar cache
-    cache.models[brandId] = models;
-    
-    log(`MODELOS carregados: ${models.length}`, 'success');
-    
-    res.json({
-      success: true,
-      data: models,
-      count: models.length,
-      cached: false
-    });
-    
-  } catch (error) {
-    log(`ERRO AO LISTAR MODELOS: ${error.message}`, 'error');
-    res.status(error.response?.status || 500).json({
-      success: false,
-      error: error.response?.data?.message || error.message
-    });
-  }
-});
 
-// ============================================================
-// PLANOS
-// ============================================================
+    if (response && response.data && response.data.models) {
+      const models = response.data.models;
+      cache.models[brandId] = models;
 
-app.get('/api/clubfix/quotation', async (req, res) => {
-  log('COTAÇÃO DE PLANOS');
-  
-  try {
-    const { model_id, sum_insured } = req.query;
-    
-    if (!model_id || !sum_insured) {
-      return res.status(400).json({
-        success: false,
-        error: 'Parâmetros obrigatórios: model_id, sum_insured'
+      console.log(`✅ MODELOS carregados: ${models.length}`);
+
+      return res.json({
+        success: true,
+        data: models,
+        count: models.length,
+        cached: false
       });
     }
-    
-    const response = await makeAuthenticatedRequest('GET', `/quotation?model_id=${model_id}&sum_insured=${sum_insured}`);
-    
-    log(`PLANOS cotados: ${response.data.data?.length || 0}`, 'success');
-    
+
+    throw new Error('Resposta inválida da API ClubFix');
+  } catch (error) {
+    console.error('❌ Erro ao buscar modelos:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: error.response?.data || error.message
+    });
+  }
+});
+
+// Cotação
+app.get('/api/clubfix/quotation', async (req, res) => {
+  try {
+    const { plan_id, model_id, year } = req.query;
+
+    if (!plan_id || !model_id || !year) {
+      return res.status(400).json({
+        success: false,
+        error: 'Parâmetros obrigatórios: plan_id, model_id, year'
+      });
+    }
+
+    console.log(`\n💰 COTAÇÃO - Plano: ${plan_id}, Modelo: ${model_id}, Ano: ${year}`);
+
+    const response = await makeAuthenticatedRequest(
+      'GET',
+      `/quotation?plan_id=${plan_id}&model_id=${model_id}&year=${year}`
+    );
+
+    console.log('✅ Cotação realizada com sucesso');
+
     res.json({
       success: true,
-      data: response.data.data,
-      count: response.data.data?.length || 0
+      data: response.data
     });
-    
   } catch (error) {
-    log(`ERRO AO COTAR PLANOS: ${error.message}`, 'error');
-    res.status(error.response?.status || 500).json({
+    console.error('❌ Erro ao realizar cotação:', error.response?.data || error.message);
+    res.status(500).json({
       success: false,
-      error: error.response?.data?.message || error.message
+      error: error.response?.data || error.message
     });
   }
 });
 
-// ============================================================
-// ASSINATURAS
-// ============================================================
-
+// Criar assinatura
 app.post('/api/clubfix/subscriptions', async (req, res) => {
-  log('CRIAR ASSINATURA');
-  
   try {
+    console.log('\n📝 CRIAR ASSINATURA');
+    console.log('Dados recebidos:', JSON.stringify(req.body, null, 2));
+
     const response = await makeAuthenticatedRequest('POST', '/subscriptions', req.body);
-    
-    log(`ASSINATURA criada: ${response.data.data?.id}`, 'success');
-    
+
+    console.log('✅ Assinatura criada com sucesso!');
+    console.log('ID:', response.data?.id);
+
     res.status(201).json({
       success: true,
-      data: response.data.data
+      data: response.data
     });
-    
   } catch (error) {
-    log(`ERRO AO CRIAR ASSINATURA: ${error.message}`, 'error');
-    res.status(error.response?.status || 500).json({
+    console.error('❌ Erro ao criar assinatura:', error.response?.data || error.message);
+    res.status(500).json({
       success: false,
-      error: error.response?.data?.message || error.message
+      error: error.response?.data || error.message
     });
   }
 });
 
-// ============================================================
-// INICIALIZAÇÃO DO SERVIDOR
-// ============================================================
+// ============================================
+// INICIALIZAÇÃO
+// ============================================
 
-async function startServer() {
-  console.log('='.repeat(60));
-  console.log('==> 🏆 BACKEND PROTEGMAIS - VERSÃO 16.2 - FIX BRANDS PAGINATION');
-  console.log('='.repeat(60));
-  console.log('==> Porta:', PORT);
-  console.log('==> URL Pública: https://protegmais.onrender.com');
-  console.log('='.repeat(60));
-  console.log('==> 🔐 CREDENCIAIS DE PRODUÇÃO CONFIGURADAS');
-  console.log('==> 🚀 FORÇANDO AMBIENTE DE PRODUÇÃO (sem fallback)');
-  console.log('='.repeat(60));
-  
+app.listen(PORT, async () => {
+  console.log('\n' + '='.repeat(60));
+  console.log(`✅ Servidor rodando na porta ${PORT}`);
+  console.log(`📍 URL: http://localhost:${PORT}`);
+  console.log(`🌐 Ambiente: ${CONFIG.environment}`);
+  console.log(`🔗 ClubFix: ${CONFIG.baseURL}`);
+  console.log('='.repeat(60) + '\n');
+
   // Autenticar na inicialização
-  const authenticated = await authenticate();
-  
-  if (!authenticated) {
-    console.error('='.repeat(60));
-    console.error('==> ❌ FALHA NA AUTENTICAÇÃO!');
-    console.error('==> Servidor NÃO será iniciado!');
-    console.error('==> Verifique as credenciais de PRODUÇÃO');
-    console.error('='.repeat(60));
-    process.exit(1);
+  try {
+    await authenticate();
+    console.log('\n🎉 Sistema pronto para uso!\n');
+  } catch (error) {
+    console.error('\n⚠️  Falha na autenticação inicial. O sistema tentará autenticar na primeira requisição.\n');
   }
-  
-  // Iniciar servidor
-  app.listen(PORT, () => {
-    console.log('='.repeat(60));
-    console.log('==> ✅ SERVIDOR PRONTO!');
-    console.log('==> Endpoints principais:');
-    console.log('==> - GET /health');
-    console.log('==> - GET /api/clubfix/brands');
-    console.log('==> - GET /api/clubfix/models/:brandId');
-    console.log('==> - GET /api/clubfix/quotation');
-    console.log('==> - POST /api/clubfix/subscriptions');
-    console.log('='.repeat(60));
-  });
-}
-
-// Iniciar
-startServer().catch(error => {
-  console.error('='.repeat(60));
-  console.error('==> ❌ ERRO FATAL NA INICIALIZAÇÃO!');
-  console.error('==> Erro:', error.message);
-  console.error('==> Stack:', error.stack);
-  console.error('='.repeat(60));
-  process.exit(1);
 });
+
+module.exports = app;
