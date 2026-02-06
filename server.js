@@ -30,18 +30,33 @@ app.use(express.json());
 // CONFIGURAÇÃO DA API CLUBFIX
 // ============================================================
 
+// Ambientes disponíveis
+const ENVIRONMENTS = {
+  PRODUCTION: {
+    baseURL: 'https://clubfix.com.br/webservice',
+    name: 'PRODUCAO',
+    priority: 1,
+    expectedBrands: '25+'
+  },
+  HOMOLOG: {
+    baseURL: 'https://homolog.clubfix.com.br/webservice',
+    name: 'HOMOLOGACAO',
+    priority: 2,
+    expectedBrands: '6'
+  }
+};
+
 const CLUBFIX_CONFIG = {
-  // URL base - PRODUÇÃO (25+ marcas reais)
-  baseURL: 'https://clubfix.com.br/webservice',
+  // URL base - será definida automaticamente no startup
+  baseURL: null,
+  environment: null,
   
   credentials: {
     email: 'kainow@clubfix.com.br',
     password: 'Kainow@27923746',
     client_id: '96639fd2-7598-46a7-89e8-05b84c7f3b6b',
     client_secret: 'CLUBFIX698497c880cb41770297288'
-  },
-  
-  environment: 'PRODUCAO'
+  }
 };
 
 // Token de autenticação
@@ -78,14 +93,9 @@ function log(message, level = 'info') {
 // AUTENTICAÇÃO
 // ============================================================
 
-async function authenticate() {
-  console.log('='.repeat(60));
-  console.log('==> AUTENTICANDO NA API CLUBFIX...');
-  console.log('='.repeat(60));
-  console.log('==> URL:', `${CLUBFIX_CONFIG.baseURL}/auth/login`);
-  console.log('==> Email:', CLUBFIX_CONFIG.credentials.email);
-  console.log('==> Client ID:', CLUBFIX_CONFIG.credentials.client_id);
-  console.log('==> X-CREDENTIALS:', getCredentialsHeader().substring(0, 20) + '...');
+async function tryAuthenticateWithEnvironment(env) {
+  console.log(`==> 🔧 Tentando ${env.name}...`);
+  console.log(`==> URL: ${env.baseURL}/auth/login`);
   
   try {
     const requestBody = {
@@ -99,50 +109,74 @@ async function authenticate() {
       'Content-Type': 'application/json'
     };
     
-    console.log('==> Request Body:', JSON.stringify(requestBody));
-    console.log('==> Fazendo requisicao...');
-    
     const response = await axios.post(
-      `${CLUBFIX_CONFIG.baseURL}/auth/login`,
+      `${env.baseURL}/auth/login`,
       requestBody,
       { headers: requestHeaders }
     );
 
     const { access_token, expires_in } = response.data;
     
+    // Sucesso! Configurar o ambiente
+    CLUBFIX_CONFIG.baseURL = env.baseURL;
+    CLUBFIX_CONFIG.environment = env.name;
+    
     authToken.access_token = access_token;
     authToken.expires_at = Date.now() + (expires_in * 1000);
     
     console.log('==> ✅ AUTENTICACAO REALIZADA COM SUCESSO!');
-    console.log(`==> Token: ${access_token.substring(0, 20)}...`);
-    console.log(`==> Expira em: ${expires_in} segundos`);
+    console.log(`==> Ambiente: ${env.name}`);
+    console.log(`==> URL Base: ${env.baseURL}`);
+    console.log(`==> Marcas Esperadas: ${env.expectedBrands}`);
+    console.log(`==> Token expira em: ${expires_in} segundos`);
     console.log('='.repeat(60));
     
-    return true;
+    return { success: true, environment: env };
   } catch (error) {
-    console.error('='.repeat(60));
-    console.error('==> ❌ ERRO NA AUTENTICACAO:');
-    console.error('='.repeat(60));
-    console.error(`==> Status HTTP: ${error.response?.status}`);
-    console.error(`==> Status Text: ${error.response?.statusText}`);
-    console.error(`==> Mensagem: ${error.response?.data?.message || error.message}`);
-    console.error(`==> Error Code: ${error.code}`);
-    console.error('==> Dados da resposta:');
-    console.error(JSON.stringify(error.response?.data, null, 2));
-    console.error('==> Headers da resposta:');
-    console.error(JSON.stringify(error.response?.headers, null, 2));
-    console.error('==> Corpo da requisição enviado:');
-    console.error(JSON.stringify({
-      client_id: CLUBFIX_CONFIG.credentials.client_id,
-      client_secret: CLUBFIX_CONFIG.credentials.client_secret.substring(0, 10) + '...'
-    }, null, 2));
-    console.error('==> Headers da requisição:');
-    console.error('X-CREDENTIALS: ' + getCredentialsHeader().substring(0, 30) + '...');
-    console.error('Accept: application/json');
-    console.error('Content-Type: application/json');
-    console.error('='.repeat(60));
-    return false;
+    console.log(`==> ⚠️ ${env.name} indisponível:`, error.response?.data?.message || error.message);
+    return { success: false, error: error.message };
   }
+}
+
+async function authenticate() {
+  console.log('='.repeat(60));
+  console.log('==> 🚀 AUTO-DETECT: AUTENTICANDO NA API CLUBFIX...');
+  console.log('='.repeat(60));
+  console.log('==> Email:', CLUBFIX_CONFIG.credentials.email);
+  console.log('==> Client ID:', CLUBFIX_CONFIG.credentials.client_id);
+  console.log('='.repeat(60));
+  
+  // Tentar produção primeiro
+  let result = await tryAuthenticateWithEnvironment(ENVIRONMENTS.PRODUCTION);
+  
+  if (result.success) {
+    console.log('==> 🏆 PRODUCAO ATIVA! Sistema completo com 25+ marcas!');
+    console.log('='.repeat(60));
+    return true;
+  }
+  
+  // Se produção falhar, tentar homologação
+  console.log('==> 🔄 Tentando ambiente alternativo...');
+  console.log('='.repeat(60));
+  
+  result = await tryAuthenticateWithEnvironment(ENVIRONMENTS.HOMOLOG);
+  
+  if (result.success) {
+    console.log('==> ℹ️ HOMOLOGACAO ATIVA! 6 marcas disponíveis.');
+    console.log('==> ⚠️ Para acessar PRODUCAO (25+ marcas), contate:');
+    console.log('==> 📧 ti@clubfix.com.br');
+    console.log('='.repeat(60));
+    return true;
+  }
+  
+  // Ambos falharam
+  console.error('='.repeat(60));
+  console.error('==> ❌ ERRO: Não foi possível autenticar em nenhum ambiente!');
+  console.error('==> Produção:', result.error);
+  console.error('==> Homologação:', result.error);
+  console.error('==> Contate: ti@clubfix.com.br');
+  console.error('='.repeat(60));
+  return false;
 }
 
 async function ensureValidToken() {
@@ -178,19 +212,29 @@ async function makeAuthenticatedRequest(method, endpoint, data = null, params = 
 // ============================================================
 
 app.get('/health', (req, res) => {
+  const isProduction = CLUBFIX_CONFIG.environment === 'PRODUCAO';
+  const expectedBrands = isProduction ? '25+' : '6';
+  
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    environment: CLUBFIX_CONFIG.environment,
-    baseURL: CLUBFIX_CONFIG.baseURL,
+    environment: CLUBFIX_CONFIG.environment || 'NOT_INITIALIZED',
+    baseURL: CLUBFIX_CONFIG.baseURL || 'NOT_INITIALIZED',
     authenticated: !!authToken.access_token,
     tokenValid: authToken.access_token && Date.now() < authToken.expires_at,
+    expectedBrands: expectedBrands,
+    autoDetect: true,
     cache: {
       brands: cache.brands ? cache.brands.length : 0,
       models: Object.keys(cache.models).length,
       plans: !!cache.plans,
       lastUpdate: cache.lastUpdate
-    }
+    },
+    message: isProduction 
+      ? '🏆 Produção ativa! Sistema completo com 25+ marcas'
+      : CLUBFIX_CONFIG.environment === 'HOMOLOGACAO'
+        ? 'ℹ️ Homologação ativa. Para produção (25+ marcas), contate ti@clubfix.com.br'
+        : 'Inicializando...'
   });
 });
 
@@ -897,13 +941,15 @@ app.listen(PORT, async () => {
   console.log('\n');
   console.log('\n');
   console.log('='.repeat(60));
-  console.log('==> PROTEGMAIS BACKEND - API OFICIAL CLUBFIX');
-  console.log('==> VERSAO SUPER COMPLETA v3.0');
+  console.log('==> 🏆 PROTEGMAIS BACKEND - API OFICIAL CLUBFIX');
+  console.log('==> 🚀 VERSAO AUTO-DETECT v3.1');
   console.log('='.repeat(60));
   console.log(`==> Porta: ${PORT}`);
-  console.log(`==> Ambiente: ${CLUBFIX_CONFIG.environment}`);
-  console.log(`==> URL Base: ${CLUBFIX_CONFIG.baseURL}`);
   console.log(`==> URL Publica: https://protegmais.onrender.com`);
+  console.log('='.repeat(60));
+  console.log('==> 🔍 AUTO-DETECT: Detectando melhor ambiente...');
+  console.log('==> 1️⃣ Tentará PRODUCAO primeiro (25+ marcas)');
+  console.log('==> 2️⃣ Se falhar, usa HOMOLOGACAO (6 marcas)');
   console.log('='.repeat(60));
   console.log('\n');
   
