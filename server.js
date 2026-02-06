@@ -47,8 +47,8 @@ const CONFIG = {
   }
 };
 
-// Usar homologação por padrão (depois mudamos para produção)
-const ACTIVE_CONFIG = CONFIG.homolog;
+// Usar PRODUÇÃO (25+ marcas)
+const ACTIVE_CONFIG = CONFIG.producao;
 
 console.log('\n' + '='.repeat(60));
 console.log('🚀 BACKEND PROTEGMAIS - VERSÃO 18.0 - FORMATO CORRETO');
