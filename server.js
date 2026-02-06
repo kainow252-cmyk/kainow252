@@ -294,13 +294,74 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
       });
     }
 
-    // Buscar modelos
-    const response = await makeAuthenticatedRequest('GET', `/brands/${brandId}`);
+    // Buscar modelos - Tentar múltiplos endpoints
+    let response = null;
+    let models = null;
 
-    if (response && response.data && response.data.models) {
-      const models = response.data.models;
+    // TENTATIVA 1: GET /brands/{id}
+    try {
+      console.log(`🧪 Tentativa 1: GET /brands/${brandId}`);
+      response = await makeAuthenticatedRequest('GET', `/brands/${brandId}`);
+      console.log(`📦 Resposta bruta:`, JSON.stringify(response).substring(0, 500));
+
+      // Tentar extrair modelos de diferentes formatos
+      if (response?.data?.models) {
+        models = response.data.models;
+        console.log(`✅ Formato 1: response.data.models (${models.length} modelos)`);
+      } else if (response?.models) {
+        models = response.models;
+        console.log(`✅ Formato 2: response.models (${models.length} modelos)`);
+      } else if (Array.isArray(response?.data)) {
+        models = response.data;
+        console.log(`✅ Formato 3: response.data (${models.length} modelos)`);
+      } else if (Array.isArray(response)) {
+        models = response;
+        console.log(`✅ Formato 4: response (${models.length} modelos)`);
+      }
+    } catch (err) {
+      console.log(`❌ Tentativa 1 falhou: ${err.message}`);
+    }
+
+    // TENTATIVA 2: GET /models?brand_id={id}
+    if (!models) {
+      try {
+        console.log(`🧪 Tentativa 2: GET /models?brand_id=${brandId}`);
+        response = await makeAuthenticatedRequest('GET', `/models?brand_id=${brandId}`);
+        console.log(`📦 Resposta bruta:`, JSON.stringify(response).substring(0, 500));
+
+        if (response?.data) {
+          models = Array.isArray(response.data) ? response.data : [response.data];
+          console.log(`✅ Formato 5: /models?brand_id (${models.length} modelos)`);
+        } else if (Array.isArray(response)) {
+          models = response;
+          console.log(`✅ Formato 6: /models direct array (${models.length} modelos)`);
+        }
+      } catch (err) {
+        console.log(`❌ Tentativa 2 falhou: ${err.message}`);
+      }
+    }
+
+    // TENTATIVA 3: GET /brands/{id}/models
+    if (!models) {
+      try {
+        console.log(`🧪 Tentativa 3: GET /brands/${brandId}/models`);
+        response = await makeAuthenticatedRequest('GET', `/brands/${brandId}/models`);
+        console.log(`📦 Resposta bruta:`, JSON.stringify(response).substring(0, 500));
+
+        if (response?.data) {
+          models = Array.isArray(response.data) ? response.data : [response.data];
+          console.log(`✅ Formato 7: /brands/{id}/models (${models.length} modelos)`);
+        } else if (Array.isArray(response)) {
+          models = response;
+          console.log(`✅ Formato 8: direct array (${models.length} modelos)`);
+        }
+      } catch (err) {
+        console.log(`❌ Tentativa 3 falhou: ${err.message}`);
+      }
+    }
+
+    if (models && models.length > 0) {
       cache.models[brandId] = models;
-
       console.log(`✅ MODELOS carregados: ${models.length}`);
 
       return res.json({
@@ -311,12 +372,14 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
       });
     }
 
-    throw new Error('Resposta inválida da API ClubFix');
+    throw new Error('Nenhum formato de resposta válido encontrado');
   } catch (error) {
     console.error('❌ Erro ao buscar modelos:', error.response?.data || error.message);
+    console.error('Stack:', error.stack);
     res.status(500).json({
       success: false,
-      error: error.response?.data || error.message
+      error: error.response?.data || error.message,
+      details: 'Verifique os logs do servidor para mais informações'
     });
   }
 });
