@@ -1,15 +1,18 @@
 /**
- * ProtegMais Backend - API OFICIAL CLUBFIX - VERSÃO COMPLETA
- * Integração TOTAL com Webservice de Parceiros
+ * ProtegMais Backend - API OFICIAL CLUBFIX - VERSÃO SUPER COMPLETA
+ * Integração TOTAL com todos os endpoints do Webservice de Parceiros
  * 
- * Endpoints disponíveis:
- * - Autenticação
- * - Marcas de Dispositivos
- * - Modelos de Dispositivos
- * - Planos de Assinatura
- * - Cotações
- * - Clientes
- * - Assinaturas
+ * Funcionalidades:
+ * ✅ Autenticação OAuth2
+ * ✅ Marcas e Modelos de Dispositivos
+ * ✅ Planos de Assinatura
+ * ✅ Cotações (Quotation)
+ * ✅ Assinaturas (Subscriptions)
+ * ✅ Pagamentos
+ * ✅ Planos Anuais (Annual Plans)
+ * ✅ Clientes (Customers)
+ * ✅ Lojistas (Shopkeepers)
+ * ✅ Cache inteligente
  */
 
 const express = require('express');
@@ -28,13 +31,17 @@ app.use(express.json());
 // ============================================================
 
 const CLUBFIX_CONFIG = {
-  baseURL: 'https://homolog.clubfix.com.br/webservice',
+  // URL base - PRODUÇÃO (25+ marcas reais)
+  baseURL: 'https://clubfix.com.br/webservice',  // ← PRODUÇÃO!
+  
   credentials: {
     email: 'kainow@clubfix.com.br',
     password: 'Kainow@27923746',
     client_id: '96639fd2-7598-46a7-89e8-05b84c7f3b6b',
     client_secret: 'CLUBFIX698497c880cb41770297288'
-  }
+  },
+  
+  environment: 'PRODUCAO'  // Identificador do ambiente
 };
 
 // Token de autenticação
@@ -43,22 +50,33 @@ let authToken = {
   expires_at: null
 };
 
-// Cache simples
+// Cache inteligente
 const cache = {
   brands: null,
   models: {},
   plans: null,
+  annualPlans: {},
   lastUpdate: null
 };
 
 // ============================================================
-// AUTENTICAÇÃO
+// UTILITÁRIOS
 // ============================================================
 
 function getCredentialsHeader() {
   const credentials = `${CLUBFIX_CONFIG.credentials.email}:${CLUBFIX_CONFIG.credentials.password}`;
   return Buffer.from(credentials).toString('base64');
 }
+
+function log(message, level = 'info') {
+  const timestamp = new Date().toISOString();
+  const prefix = level === 'error' ? '❌' : level === 'success' ? '✅' : '📍';
+  console.log(`[${timestamp}] ${prefix} ${message}`);
+}
+
+// ============================================================
+// AUTENTICAÇÃO
+// ============================================================
 
 async function authenticate() {
   console.log('='.repeat(60));
@@ -86,23 +104,21 @@ async function authenticate() {
     authToken.access_token = access_token;
     authToken.expires_at = Date.now() + (expires_in * 1000);
     
-    console.log('==> ✅ AUTENTICACAO REALIZADA COM SUCESSO!');
-    console.log(`==> Token expira em: ${expires_in} segundos`);
+    log('AUTENTICACAO REALIZADA COM SUCESSO!', 'success');
+    log(`Token expira em: ${expires_in} segundos`);
     console.log('='.repeat(60));
     
     return true;
   } catch (error) {
-    console.error('==> ❌ ERRO NA AUTENTICACAO:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error(`==> Mensagem: ${error.response?.data?.message || error.message}`);
-    console.error('='.repeat(60));
+    log(`ERRO NA AUTENTICACAO: ${error.response?.data?.message || error.message}`, 'error');
+    console.log('='.repeat(60));
     return false;
   }
 }
 
 async function ensureValidToken() {
   if (!authToken.access_token || Date.now() >= authToken.expires_at) {
-    console.log('==> Token expirado ou inexistente, renovando...');
+    log('Token expirado ou inexistente, renovando...');
     return await authenticate();
   }
   return true;
@@ -129,19 +145,42 @@ async function makeAuthenticatedRequest(method, endpoint, data = null, params = 
 }
 
 // ============================================================
-// ENDPOINTS - HEALTH CHECK
+// ENDPOINTS - HEALTH & INFO
 // ============================================================
 
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
+    environment: CLUBFIX_CONFIG.environment,
+    baseURL: CLUBFIX_CONFIG.baseURL,
     authenticated: !!authToken.access_token,
     tokenValid: authToken.access_token && Date.now() < authToken.expires_at,
-    cacheStatus: {
-      brands: !!cache.brands,
+    cache: {
+      brands: cache.brands ? cache.brands.length : 0,
+      models: Object.keys(cache.models).length,
       plans: !!cache.plans,
       lastUpdate: cache.lastUpdate
+    }
+  });
+});
+
+app.get('/api/info', (req, res) => {
+  res.json({
+    name: 'ProtegMais Backend API',
+    version: '3.0.0',
+    environment: process.env.CLUBFIX_ENV || 'homologacao',
+    baseURL: CLUBFIX_CONFIG.baseURL,
+    endpoints: {
+      health: 'GET /health',
+      brands: 'GET /api/clubfix/brands',
+      models: 'GET /api/clubfix/models',
+      plans: 'GET /api/clubfix/plans',
+      quotation: 'GET /api/clubfix/quotation',
+      customers: 'POST /api/clubfix/customers',
+      subscriptions: 'POST /api/clubfix/subscriptions',
+      annualPlans: 'POST /api/clubfix/annual-plans',
+      cache: 'POST /api/cache/clear'
     }
   });
 });
@@ -150,20 +189,15 @@ app.get('/health', (req, res) => {
 // ENDPOINTS - MARCAS (BRANDS)
 // ============================================================
 
-/**
- * GET /api/clubfix/brands - Listar todas as marcas
- */
 app.get('/api/clubfix/brands', async (req, res) => {
   console.log('='.repeat(60));
-  console.log('==> REQUISICAO DE MARCAS');
+  log('REQUISICAO DE MARCAS');
   console.log('='.repeat(60));
   
   try {
-    // Verifica cache (válido por 1 hora)
+    // Cache check
     if (cache.brands && cache.lastUpdate && (Date.now() - cache.lastUpdate < 3600000)) {
-      console.log('==> ✅ RETORNANDO MARCAS DO CACHE');
-      console.log(`==> Total: ${cache.brands.length} marcas`);
-      console.log('='.repeat(60));
+      log(`Retornando ${cache.brands.length} marcas do cache`, 'success');
       return res.json({
         success: true,
         cached: true,
@@ -172,73 +206,74 @@ app.get('/api/clubfix/brands', async (req, res) => {
       });
     }
     
-    console.log('==> Buscando marcas da API ClubFix...');
+    log('Buscando marcas da API ClubFix...');
     
-    // Força buscar todas as marcas (per_page=100)
-    const { page, per_page } = req.query;
+    const { page, per_page, include } = req.query;
+    
+    // Buscar TODAS as marcas (sem paginação limitada)
     const params = { 
       page: page || 1, 
-      per_page: per_page || 100  // Busca até 100 marcas por padrão
+      per_page: per_page || 200  // Aumentado para 200 para pegar todas as marcas
     };
+    if (include) params.include = include;
     
-    console.log(`==> Parametros: page=${params.page}, per_page=${params.per_page}`);
+    log(`Parametros: page=${params.page}, per_page=${params.per_page}`);
     
     const response = await makeAuthenticatedRequest('GET', '/brands', null, params);
-    
     const brands = response.data.data || response.data;
     
-    console.log(`==> API retornou: ${brands.length} marcas`);
-    console.log(`==> Total disponível: ${response.data.meta?.total || brands.length}`);
+    // Se a API usar paginação e houver mais páginas, buscar todas
+    let allBrands = [...brands];
     
-    // Salva no cache
-    cache.brands = brands;
+    if (response.data.meta && response.data.meta.last_page > 1) {
+      log(`API tem ${response.data.meta.last_page} páginas. Buscando todas...`);
+      
+      for (let currentPage = 2; currentPage <= response.data.meta.last_page; currentPage++) {
+        log(`Buscando página ${currentPage}...`);
+        const pageResponse = await makeAuthenticatedRequest('GET', '/brands', null, {
+          page: currentPage,
+          per_page: params.per_page
+        });
+        
+        const pageBrands = pageResponse.data.data || pageResponse.data;
+        allBrands = [...allBrands, ...pageBrands];
+      }
+      
+      log(`Total de marcas após buscar todas as páginas: ${allBrands.length}`);
+    }
+    
+    cache.brands = allBrands;
     cache.lastUpdate = Date.now();
     
-    console.log(`==> ✅ ${brands.length} MARCAS REAIS OBTIDAS DA API!`);
+    log(`${allBrands.length} MARCAS REAIS OBTIDAS!`, 'success');
+    log(`Total disponível na API: ${response.data.meta?.total || allBrands.length}`);
     console.log('='.repeat(60));
     
     res.json({
       success: true,
       cached: false,
-      count: brands.length,
-      data: brands,
+      count: allBrands.length,
+      data: allBrands,
       meta: response.data.meta,
-      links: response.data.links
+      links: response.data.links,
+      message: allBrands.length < 25 ? 'Ambiente de homologação pode ter menos marcas. Para todas as 25+ marcas, usar ambiente de produção.' : null
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO BUSCAR MARCAS:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error(`==> Dados: ${JSON.stringify(error.response?.data)}`);
-    console.error('='.repeat(60));
-    
+    log(`ERRO AO BUSCAR MARCAS: ${error.response?.data?.message || error.message}`, 'error');
     res.status(error.response?.status || 500).json({
       success: false,
-      error: error.response?.data?.message || error.message,
-      details: error.response?.data
+      error: error.response?.data?.message || error.message
     });
   }
 });
 
-/**
- * GET /api/clubfix/brands/:id - Obter marca por ID
- */
 app.get('/api/clubfix/brands/:id', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log(`==> REQUISICAO DE MARCA - ID: ${req.params.id}`);
-  console.log('='.repeat(60));
-  
   try {
     const { include } = req.query;
-    const endpoint = `/brands/${req.params.id}`;
     const params = include ? { include } : null;
     
-    console.log('==> Buscando marca da API ClubFix...');
-    
-    const response = await makeAuthenticatedRequest('GET', endpoint, null, params);
-    
-    console.log('==> ✅ MARCA OBTIDA COM SUCESSO!');
-    console.log('='.repeat(60));
+    const response = await makeAuthenticatedRequest('GET', `/brands/${req.params.id}`, null, params);
     
     res.json({
       success: true,
@@ -246,10 +281,6 @@ app.get('/api/clubfix/brands/:id', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO BUSCAR MARCA:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error('='.repeat(60));
-    
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message
@@ -261,14 +292,7 @@ app.get('/api/clubfix/brands/:id', async (req, res) => {
 // ENDPOINTS - MODELOS (MODELS)
 // ============================================================
 
-/**
- * GET /api/clubfix/models - Listar modelos
- */
 app.get('/api/clubfix/models', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log('==> REQUISICAO DE MODELOS');
-  console.log('='.repeat(60));
-  
   try {
     const { page, per_page, include } = req.query;
     const filterName = req.query['filter[name]'];
@@ -278,15 +302,8 @@ app.get('/api/clubfix/models', async (req, res) => {
     if (filterName) params['filter[name]'] = filterName;
     if (filterBrand) params['filter[brand]'] = filterBrand;
     
-    console.log('==> Buscando modelos da API ClubFix...');
-    console.log(`==> Filtros: ${JSON.stringify(params)}`);
-    
     const response = await makeAuthenticatedRequest('GET', '/models', null, params);
-    
     const models = response.data.data || response.data;
-    
-    console.log(`==> ✅ ${models.length} MODELOS OBTIDOS!`);
-    console.log('='.repeat(60));
     
     res.json({
       success: true,
@@ -297,10 +314,6 @@ app.get('/api/clubfix/models', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO BUSCAR MODELOS:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error('='.repeat(60));
-    
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message
@@ -308,24 +321,18 @@ app.get('/api/clubfix/models', async (req, res) => {
   }
 });
 
-/**
- * POST /api/clubfix/brands/:id/models - Listar modelos de uma marca
- * (Compatibilidade com frontend atual)
- */
 app.post('/api/clubfix/brands/:id/models', async (req, res) => {
   console.log('='.repeat(60));
-  console.log(`==> REQUISICAO DE MODELOS - Marca ID: ${req.params.id}`);
+  log(`REQUISICAO DE MODELOS - Marca ID: ${req.params.id}`);
   console.log('='.repeat(60));
   
   try {
     const brandId = req.params.id;
     const cacheKey = `brand_${brandId}`;
     
-    // Verifica cache
+    // Cache check
     if (cache.models[cacheKey] && (Date.now() - cache.models[cacheKey].timestamp < 3600000)) {
-      console.log('==> ✅ RETORNANDO MODELOS DO CACHE');
-      console.log(`==> Total: ${cache.models[cacheKey].data.length} modelos`);
-      console.log('='.repeat(60));
+      log(`Retornando ${cache.models[cacheKey].data.length} modelos do cache`, 'success');
       return res.json({
         success: true,
         cached: true,
@@ -334,7 +341,7 @@ app.post('/api/clubfix/brands/:id/models', async (req, res) => {
       });
     }
     
-    console.log('==> Buscando modelos da API ClubFix...');
+    log('Buscando modelos da API ClubFix...');
     
     const response = await makeAuthenticatedRequest('GET', '/models', null, {
       'filter[brand]': brandId,
@@ -343,20 +350,19 @@ app.post('/api/clubfix/brands/:id/models', async (req, res) => {
     
     const models = response.data.data || response.data;
     
-    // Formata modelos para o frontend
     const formattedModels = models.map(model => ({
       id: model.id,
       name: model.name,
-      brandId: parseInt(brandId)
+      brandId: parseInt(brandId),
+      brand: model.brand
     }));
     
-    // Salva no cache
     cache.models[cacheKey] = {
       timestamp: Date.now(),
       data: formattedModels
     };
     
-    console.log(`==> ✅ ${formattedModels.length} MODELOS REAIS OBTIDOS DA API!`);
+    log(`${formattedModels.length} MODELOS REAIS OBTIDOS!`, 'success');
     console.log('='.repeat(60));
     
     res.json({
@@ -368,10 +374,7 @@ app.post('/api/clubfix/brands/:id/models', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO BUSCAR MODELOS:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error('='.repeat(60));
-    
+    log(`ERRO AO BUSCAR MODELOS: ${error.message}`, 'error');
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message
@@ -379,19 +382,9 @@ app.post('/api/clubfix/brands/:id/models', async (req, res) => {
   }
 });
 
-/**
- * GET /api/clubfix/models/:id - Obter modelo por ID
- */
 app.get('/api/clubfix/models/:id', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log(`==> REQUISICAO DE MODELO - ID: ${req.params.id}`);
-  console.log('='.repeat(60));
-  
   try {
     const response = await makeAuthenticatedRequest('GET', `/models/${req.params.id}`);
-    
-    console.log('==> ✅ MODELO OBTIDO COM SUCESSO!');
-    console.log('='.repeat(60));
     
     res.json({
       success: true,
@@ -399,10 +392,6 @@ app.get('/api/clubfix/models/:id', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO BUSCAR MODELO:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error('='.repeat(60));
-    
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message
@@ -414,19 +403,10 @@ app.get('/api/clubfix/models/:id', async (req, res) => {
 // ENDPOINTS - PLANOS (PLANS)
 // ============================================================
 
-/**
- * GET /api/clubfix/plans - Listar planos
- */
 app.get('/api/clubfix/plans', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log('==> REQUISICAO DE PLANOS');
-  console.log('='.repeat(60));
-  
   try {
-    // Verifica cache
+    // Cache check
     if (cache.plans && cache.lastUpdate && (Date.now() - cache.lastUpdate < 3600000)) {
-      console.log('==> ✅ RETORNANDO PLANOS DO CACHE');
-      console.log('='.repeat(60));
       return res.json({
         success: true,
         cached: true,
@@ -434,16 +414,11 @@ app.get('/api/clubfix/plans', async (req, res) => {
       });
     }
     
-    console.log('==> Buscando planos da API ClubFix...');
-    
     const { page } = req.query;
     const response = await makeAuthenticatedRequest('GET', '/plans', null, { page });
     
     cache.plans = response.data;
     cache.lastUpdate = Date.now();
-    
-    console.log('==> ✅ PLANOS OBTIDOS COM SUCESSO!');
-    console.log('='.repeat(60));
     
     res.json({
       success: true,
@@ -452,10 +427,6 @@ app.get('/api/clubfix/plans', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO BUSCAR PLANOS:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error('='.repeat(60));
-    
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message
@@ -463,19 +434,9 @@ app.get('/api/clubfix/plans', async (req, res) => {
   }
 });
 
-/**
- * GET /api/clubfix/plans/:id - Obter plano por ID
- */
 app.get('/api/clubfix/plans/:id', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log(`==> REQUISICAO DE PLANO - ID: ${req.params.id}`);
-  console.log('='.repeat(60));
-  
   try {
     const response = await makeAuthenticatedRequest('GET', `/plans/${req.params.id}`);
-    
-    console.log('==> ✅ PLANO OBTIDO COM SUCESSO!');
-    console.log('='.repeat(60));
     
     res.json({
       success: true,
@@ -483,10 +444,6 @@ app.get('/api/clubfix/plans/:id', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO BUSCAR PLANO:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error('='.repeat(60));
-    
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message
@@ -498,27 +455,18 @@ app.get('/api/clubfix/plans/:id', async (req, res) => {
 // ENDPOINTS - COTAÇÕES (QUOTATION)
 // ============================================================
 
-/**
- * GET /api/clubfix/quotation - Cotar todos os planos
- */
 app.get('/api/clubfix/quotation', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log('==> REQUISICAO DE COTACAO - TODOS OS PLANOS');
-  console.log('='.repeat(60));
+  log('COTACAO - Todos os planos');
   
   try {
     const { model_id, is_used } = req.query;
-    
-    console.log('==> Parametros:', { model_id, is_used });
-    console.log('==> Cotando planos na API ClubFix...');
     
     const response = await makeAuthenticatedRequest('GET', '/quotation', null, {
       model_id,
       is_used
     });
     
-    console.log('==> ✅ COTACAO REALIZADA COM SUCESSO!');
-    console.log('='.repeat(60));
+    log('COTACAO realizada com sucesso!', 'success');
     
     res.json({
       success: true,
@@ -526,10 +474,7 @@ app.get('/api/clubfix/quotation', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO NA COTACAO:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error('='.repeat(60));
-    
+    log(`ERRO NA COTACAO: ${error.message}`, 'error');
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message
@@ -537,19 +482,11 @@ app.get('/api/clubfix/quotation', async (req, res) => {
   }
 });
 
-/**
- * GET /api/clubfix/plans/:id/quotation - Cotar um plano específico
- */
 app.get('/api/clubfix/plans/:id/quotation', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log(`==> REQUISICAO DE COTACAO - Plano ID: ${req.params.id}`);
-  console.log('='.repeat(60));
+  log(`COTACAO - Plano ID: ${req.params.id}`);
   
   try {
     const { model_id, is_used } = req.query;
-    
-    console.log('==> Parametros:', { model_id, is_used });
-    console.log('==> Cotando plano na API ClubFix...');
     
     const response = await makeAuthenticatedRequest(
       'GET',
@@ -558,8 +495,7 @@ app.get('/api/clubfix/plans/:id/quotation', async (req, res) => {
       { model_id, is_used }
     );
     
-    console.log('==> ✅ COTACAO REALIZADA COM SUCESSO!');
-    console.log('='.repeat(60));
+    log('COTACAO realizada com sucesso!', 'success');
     
     res.json({
       success: true,
@@ -567,10 +503,7 @@ app.get('/api/clubfix/plans/:id/quotation', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO NA COTACAO:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error('='.repeat(60));
-    
+    log(`ERRO NA COTACAO: ${error.message}`, 'error');
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message
@@ -582,22 +515,13 @@ app.get('/api/clubfix/plans/:id/quotation', async (req, res) => {
 // ENDPOINTS - CLIENTES (CUSTOMERS)
 // ============================================================
 
-/**
- * POST /api/clubfix/customers - Registrar cliente
- */
 app.post('/api/clubfix/customers', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log('==> REGISTRO DE CLIENTE');
-  console.log('='.repeat(60));
+  log('REGISTRO DE CLIENTE');
   
   try {
-    console.log('==> Registrando cliente na API ClubFix...');
-    
     const response = await makeAuthenticatedRequest('POST', '/customers', req.body);
     
-    console.log('==> ✅ CLIENTE REGISTRADO COM SUCESSO!');
-    console.log(`==> ID: ${response.data.id}`);
-    console.log('='.repeat(60));
+    log(`CLIENTE registrado: ID ${response.data.id}`, 'success');
     
     res.status(201).json({
       success: true,
@@ -605,11 +529,7 @@ app.post('/api/clubfix/customers', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO REGISTRAR CLIENTE:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error(`==> Dados: ${JSON.stringify(error.response?.data)}`);
-    console.error('='.repeat(60));
-    
+    log(`ERRO AO REGISTRAR CLIENTE: ${error.message}`, 'error');
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message,
@@ -618,13 +538,8 @@ app.post('/api/clubfix/customers', async (req, res) => {
   }
 });
 
-/**
- * GET /api/clubfix/customers/:document - Obter cliente por documento
- */
 app.get('/api/clubfix/customers/:document', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log(`==> BUSCA DE CLIENTE - Documento: ${req.params.document}`);
-  console.log('='.repeat(60));
+  log(`BUSCA DE CLIENTE - Documento: ${req.params.document}`);
   
   try {
     const { include } = req.query;
@@ -637,8 +552,7 @@ app.get('/api/clubfix/customers/:document', async (req, res) => {
       params
     );
     
-    console.log('==> ✅ CLIENTE ENCONTRADO!');
-    console.log('='.repeat(60));
+    log('CLIENTE encontrado!', 'success');
     
     res.json({
       success: true,
@@ -646,10 +560,7 @@ app.get('/api/clubfix/customers/:document', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO BUSCAR CLIENTE:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error('='.repeat(60));
-    
+    log(`ERRO AO BUSCAR CLIENTE: ${error.message}`, 'error');
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message
@@ -661,19 +572,13 @@ app.get('/api/clubfix/customers/:document', async (req, res) => {
 // ENDPOINTS - ASSINATURAS (SUBSCRIPTIONS)
 // ============================================================
 
-/**
- * GET /api/clubfix/subscriptions - Listar assinaturas
- */
 app.get('/api/clubfix/subscriptions', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log('==> LISTAGEM DE ASSINATURAS');
-  console.log('='.repeat(60));
+  log('LISTAGEM DE ASSINATURAS');
   
   try {
     const response = await makeAuthenticatedRequest('GET', '/subscriptions');
     
-    console.log('==> ✅ ASSINATURAS OBTIDAS COM SUCESSO!');
-    console.log('='.repeat(60));
+    log('ASSINATURAS obtidas com sucesso!', 'success');
     
     res.json({
       success: true,
@@ -681,10 +586,7 @@ app.get('/api/clubfix/subscriptions', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO LISTAR ASSINATURAS:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error('='.repeat(60));
-    
+    log(`ERRO AO LISTAR ASSINATURAS: ${error.message}`, 'error');
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message
@@ -692,22 +594,13 @@ app.get('/api/clubfix/subscriptions', async (req, res) => {
   }
 });
 
-/**
- * POST /api/clubfix/subscriptions - Criar assinatura
- */
 app.post('/api/clubfix/subscriptions', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log('==> CRIACAO DE ASSINATURA');
-  console.log('='.repeat(60));
+  log('CRIACAO DE ASSINATURA');
   
   try {
-    console.log('==> Criando assinatura na API ClubFix...');
-    
     const response = await makeAuthenticatedRequest('POST', '/subscriptions', req.body);
     
-    console.log('==> ✅ ASSINATURA CRIADA COM SUCESSO!');
-    console.log(`==> ID: ${response.data.id}`);
-    console.log('='.repeat(60));
+    log(`ASSINATURA criada: ID ${response.data.id}`, 'success');
     
     res.status(201).json({
       success: true,
@@ -715,11 +608,7 @@ app.post('/api/clubfix/subscriptions', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO CRIAR ASSINATURA:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error(`==> Dados: ${JSON.stringify(error.response?.data)}`);
-    console.error('='.repeat(60));
-    
+    log(`ERRO AO CRIAR ASSINATURA: ${error.message}`, 'error');
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message,
@@ -728,19 +617,13 @@ app.post('/api/clubfix/subscriptions', async (req, res) => {
   }
 });
 
-/**
- * GET /api/clubfix/subscriptions/:id - Obter assinatura por ID
- */
 app.get('/api/clubfix/subscriptions/:id', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log(`==> BUSCA DE ASSINATURA - ID: ${req.params.id}`);
-  console.log('='.repeat(60));
+  log(`BUSCA DE ASSINATURA - ID: ${req.params.id}`);
   
   try {
     const response = await makeAuthenticatedRequest('GET', `/subscriptions/${req.params.id}`);
     
-    console.log('==> ✅ ASSINATURA ENCONTRADA!');
-    console.log('='.repeat(60));
+    log('ASSINATURA encontrada!', 'success');
     
     res.json({
       success: true,
@@ -748,10 +631,7 @@ app.get('/api/clubfix/subscriptions/:id', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO BUSCAR ASSINATURA:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error('='.repeat(60));
-    
+    log(`ERRO AO BUSCAR ASSINATURA: ${error.message}`, 'error');
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message
@@ -759,25 +639,17 @@ app.get('/api/clubfix/subscriptions/:id', async (req, res) => {
   }
 });
 
-/**
- * POST /api/clubfix/subscriptions/:id/payment - Processar pagamento
- */
 app.post('/api/clubfix/subscriptions/:id/payment', async (req, res) => {
-  console.log('='.repeat(60));
-  console.log(`==> PAGAMENTO DE ASSINATURA - ID: ${req.params.id}`);
-  console.log('='.repeat(60));
+  log(`PAGAMENTO DE ASSINATURA - ID: ${req.params.id}`);
   
   try {
-    console.log('==> Processando pagamento na API ClubFix...');
-    
     const response = await makeAuthenticatedRequest(
       'POST',
       `/subscriptions/${req.params.id}/payment`,
       req.body
     );
     
-    console.log('==> ✅ PAGAMENTO PROCESSADO COM SUCESSO!');
-    console.log('='.repeat(60));
+    log('PAGAMENTO processado com sucesso!', 'success');
     
     res.json({
       success: true,
@@ -785,11 +657,7 @@ app.post('/api/clubfix/subscriptions/:id/payment', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('==> ❌ ERRO AO PROCESSAR PAGAMENTO:');
-    console.error(`==> Status: ${error.response?.status}`);
-    console.error(`==> Dados: ${JSON.stringify(error.response?.data)}`);
-    console.error('='.repeat(60));
-    
+    log(`ERRO AO PROCESSAR PAGAMENTO: ${error.message}`, 'error');
     res.status(error.response?.status || 500).json({
       success: false,
       error: error.response?.data?.message || error.message,
@@ -799,46 +667,158 @@ app.post('/api/clubfix/subscriptions/:id/payment', async (req, res) => {
 });
 
 // ============================================================
-// ENDPOINT DE SESSÃO
+// ENDPOINTS - PLANOS ANUAIS (ANNUAL PLANS)
 // ============================================================
 
-app.get('/api/clubfix/session', (req, res) => {
-  res.json({
-    authenticated: !!authToken.access_token,
-    tokenValid: authToken.access_token && Date.now() < authToken.expires_at,
-    expiresIn: authToken.expires_at ? Math.floor((authToken.expires_at - Date.now()) / 1000) : 0
-  });
+app.get('/api/clubfix/annual-plans/quote', async (req, res) => {
+  log('COTACAO DE PLANO ANUAL');
+  
+  try {
+    const { model_id, used } = req.query;
+    
+    const response = await makeAuthenticatedRequest('GET', '/annual-plans/quote', null, {
+      model_id,
+      used
+    });
+    
+    log('COTACAO de plano anual realizada!', 'success');
+    
+    res.json({
+      success: true,
+      data: response.data
+    });
+    
+  } catch (error) {
+    log(`ERRO NA COTACAO: ${error.message}`, 'error');
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: error.response?.data?.message || error.message
+    });
+  }
+});
+
+app.post('/api/clubfix/annual-plans', async (req, res) => {
+  log('REGISTRO DE PLANO ANUAL');
+  
+  try {
+    const response = await makeAuthenticatedRequest('POST', '/annual-plans', req.body);
+    
+    log(`PLANO ANUAL registrado: ID ${response.data.id}`, 'success');
+    
+    res.status(201).json({
+      success: true,
+      data: response.data
+    });
+    
+  } catch (error) {
+    log(`ERRO AO REGISTRAR PLANO ANUAL: ${error.message}`, 'error');
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: error.response?.data?.message || error.message,
+      details: error.response?.data
+    });
+  }
+});
+
+app.get('/api/clubfix/annual-plans/:id', async (req, res) => {
+  log(`BUSCA DE PLANO ANUAL - ID: ${req.params.id}`);
+  
+  try {
+    const response = await makeAuthenticatedRequest('GET', `/annual-plans/${req.params.id}`);
+    
+    log('PLANO ANUAL encontrado!', 'success');
+    
+    res.json({
+      success: true,
+      data: response.data
+    });
+    
+  } catch (error) {
+    log(`ERRO AO BUSCAR PLANO ANUAL: ${error.message}`, 'error');
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: error.response?.data?.message || error.message
+    });
+  }
 });
 
 // ============================================================
-// ENDPOINT DE CACHE
+// ENDPOINTS - LOJISTAS (SHOPKEEPERS)
 // ============================================================
 
-/**
- * POST /api/cache/clear - Limpar cache do servidor
- */
+app.post('/api/clubfix/shopkeepers', async (req, res) => {
+  log('REGISTRO DE LOJISTA');
+  
+  try {
+    const response = await makeAuthenticatedRequest('POST', '/shopkeepers', req.body);
+    
+    log(`LOJISTA registrado: ID ${response.data.id}`, 'success');
+    
+    res.status(201).json({
+      success: true,
+      data: response.data
+    });
+    
+  } catch (error) {
+    log(`ERRO AO REGISTRAR LOJISTA: ${error.message}`, 'error');
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: error.response?.data?.message || error.message,
+      details: error.response?.data
+    });
+  }
+});
+
+app.get('/api/clubfix/shopkeepers/:id', async (req, res) => {
+  log(`BUSCA DE LOJISTA - ID: ${req.params.id}`);
+  
+  try {
+    const { page, per_page, include } = req.query;
+    const params = { page, per_page, include };
+    
+    const response = await makeAuthenticatedRequest(
+      'GET',
+      `/shopkeepers/${req.params.id}`,
+      null,
+      params
+    );
+    
+    log('LOJISTA encontrado!', 'success');
+    
+    res.json({
+      success: true,
+      data: response.data
+    });
+    
+  } catch (error) {
+    log(`ERRO AO BUSCAR LOJISTA: ${error.message}`, 'error');
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: error.response?.data?.message || error.message
+    });
+  }
+});
+
+// ============================================================
+// ENDPOINTS - CACHE
+// ============================================================
+
 app.post('/api/cache/clear', (req, res) => {
-  console.log('='.repeat(60));
-  console.log('==> LIMPANDO CACHE DO SERVIDOR');
-  console.log('='.repeat(60));
+  log('LIMPANDO CACHE');
   
   const oldCache = {
     brands: cache.brands ? cache.brands.length : 0,
     models: Object.keys(cache.models).length,
-    plans: !!cache.plans,
-    lastUpdate: cache.lastUpdate
+    plans: !!cache.plans
   };
   
-  // Limpa todo o cache
   cache.brands = null;
   cache.models = {};
   cache.plans = null;
+  cache.annualPlans = {};
   cache.lastUpdate = null;
   
-  console.log('==> ✅ CACHE LIMPO COM SUCESSO!');
-  console.log(`==> Marcas em cache: ${oldCache.brands} → 0`);
-  console.log(`==> Modelos em cache: ${oldCache.models} → 0`);
-  console.log('='.repeat(60));
+  log('CACHE limpo com sucesso!', 'success');
   
   res.json({
     success: true,
@@ -852,9 +832,6 @@ app.post('/api/cache/clear', (req, res) => {
   });
 });
 
-/**
- * GET /api/cache/status - Ver status do cache
- */
 app.get('/api/cache/status', (req, res) => {
   res.json({
     success: true,
@@ -862,9 +839,24 @@ app.get('/api/cache/status', (req, res) => {
       brands: cache.brands ? cache.brands.length : 0,
       models: Object.keys(cache.models).length,
       plans: !!cache.plans,
+      annualPlans: Object.keys(cache.annualPlans).length,
       lastUpdate: cache.lastUpdate,
       age: cache.lastUpdate ? Math.floor((Date.now() - cache.lastUpdate) / 1000) : null
     }
+  });
+});
+
+// ============================================================
+// ENDPOINT DE SESSÃO
+// ============================================================
+
+app.get('/api/clubfix/session', (req, res) => {
+  res.json({
+    authenticated: !!authToken.access_token,
+    tokenValid: authToken.access_token && Date.now() < authToken.expires_at,
+    expiresIn: authToken.expires_at ? Math.floor((authToken.expires_at - Date.now()) / 1000) : 0,
+    environment: CLUBFIX_CONFIG.environment,
+    baseURL: CLUBFIX_CONFIG.baseURL
   });
 });
 
@@ -874,35 +866,72 @@ app.get('/api/cache/status', (req, res) => {
 
 app.listen(PORT, async () => {
   console.log('\n');
+  console.log('\n');
   console.log('='.repeat(60));
   console.log('==> PROTEGMAIS BACKEND - API OFICIAL CLUBFIX');
-  console.log('==> VERSAO COMPLETA');
+  console.log('==> VERSAO SUPER COMPLETA v3.0');
+  console.log('==> 🚀 AMBIENTE DE PRODUCAO - 25+ MARCAS REAIS!');
   console.log('='.repeat(60));
   console.log(`==> Porta: ${PORT}`);
-  console.log(`==> Ambiente: HOMOLOGACAO`);
-  console.log(`==> URL: https://protegmais.onrender.com`);
+  console.log(`==> Ambiente: ${CLUBFIX_CONFIG.environment}`);
+  console.log(`==> URL Base: ${CLUBFIX_CONFIG.baseURL}`);
+  console.log(`==> URL Publica: https://protegmais.onrender.com`);
   console.log('='.repeat(60));
   console.log('\n');
   
-  // Autentica ao iniciar
   const authenticated = await authenticate();
   
   if (authenticated) {
     console.log('==> ✅ SERVIDOR PRONTO!');
     console.log('==> Endpoints disponiveis:');
+    console.log('==>');
+    console.log('==>   GERAL:');
     console.log('==>   - GET  /health');
+    console.log('==>   - GET  /api/info');
+    console.log('==>   - GET  /api/clubfix/session');
+    console.log('==>');
+    console.log('==>   DISPOSITIVOS:');
     console.log('==>   - GET  /api/clubfix/brands');
-    console.log('==>   - POST /api/clubfix/brands/:id/models');
+    console.log('==>   - GET  /api/clubfix/brands/:id');
     console.log('==>   - GET  /api/clubfix/models');
+    console.log('==>   - POST /api/clubfix/brands/:id/models');
+    console.log('==>   - GET  /api/clubfix/models/:id');
+    console.log('==>');
+    console.log('==>   PLANOS:');
     console.log('==>   - GET  /api/clubfix/plans');
+    console.log('==>   - GET  /api/clubfix/plans/:id');
+    console.log('==>');
+    console.log('==>   COTACOES:');
     console.log('==>   - GET  /api/clubfix/quotation');
+    console.log('==>   - GET  /api/clubfix/plans/:id/quotation');
+    console.log('==>');
+    console.log('==>   CLIENTES:');
     console.log('==>   - POST /api/clubfix/customers');
+    console.log('==>   - GET  /api/clubfix/customers/:document');
+    console.log('==>');
+    console.log('==>   ASSINATURAS:');
+    console.log('==>   - GET  /api/clubfix/subscriptions');
     console.log('==>   - POST /api/clubfix/subscriptions');
+    console.log('==>   - GET  /api/clubfix/subscriptions/:id');
+    console.log('==>   - POST /api/clubfix/subscriptions/:id/payment');
+    console.log('==>');
+    console.log('==>   PLANOS ANUAIS:');
+    console.log('==>   - GET  /api/clubfix/annual-plans/quote');
+    console.log('==>   - POST /api/clubfix/annual-plans');
+    console.log('==>   - GET  /api/clubfix/annual-plans/:id');
+    console.log('==>');
+    console.log('==>   LOJISTAS:');
+    console.log('==>   - POST /api/clubfix/shopkeepers');
+    console.log('==>   - GET  /api/clubfix/shopkeepers/:id');
+    console.log('==>');
+    console.log('==>   CACHE:');
+    console.log('==>   - GET  /api/cache/status');
+    console.log('==>   - POST /api/cache/clear');
     console.log('='.repeat(60));
     console.log('\n');
   } else {
     console.log('==> ⚠️ SERVIDOR INICIADO MAS NAO AUTENTICADO!');
-    console.log('==> Verificar credenciais e endpoint');
+    console.log('==> Verificar credenciais');
     console.log('='.repeat(60));
     console.log('\n');
   }
