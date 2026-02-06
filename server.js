@@ -32,7 +32,7 @@ app.use(express.json());
 
 const CLUBFIX_CONFIG = {
   // URL base - PRODUÇÃO (25+ marcas reais)
-  baseURL: 'https://clubfix.com.br/webservice',  // ← PRODUÇÃO!
+  baseURL: 'https://clubfix.com.br/webservice',
   
   credentials: {
     email: 'kainow@clubfix.com.br',
@@ -41,7 +41,7 @@ const CLUBFIX_CONFIG = {
     client_secret: 'CLUBFIX698497c880cb41770297288'
   },
   
-  environment: 'PRODUCAO'  // Identificador do ambiente
+  environment: 'PRODUCAO'
 };
 
 // Token de autenticação
@@ -82,21 +82,30 @@ async function authenticate() {
   console.log('='.repeat(60));
   console.log('==> AUTENTICANDO NA API CLUBFIX...');
   console.log('='.repeat(60));
+  console.log('==> URL:', `${CLUBFIX_CONFIG.baseURL}/auth/login`);
+  console.log('==> Email:', CLUBFIX_CONFIG.credentials.email);
+  console.log('==> Client ID:', CLUBFIX_CONFIG.credentials.client_id);
+  console.log('==> X-CREDENTIALS:', getCredentialsHeader().substring(0, 20) + '...');
   
   try {
+    const requestBody = {
+      client_id: CLUBFIX_CONFIG.credentials.client_id,
+      client_secret: CLUBFIX_CONFIG.credentials.client_secret
+    };
+    
+    const requestHeaders = {
+      'X-CREDENTIALS': getCredentialsHeader(),
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    };
+    
+    console.log('==> Request Body:', JSON.stringify(requestBody));
+    console.log('==> Fazendo requisicao...');
+    
     const response = await axios.post(
       `${CLUBFIX_CONFIG.baseURL}/auth/login`,
-      {
-        client_id: CLUBFIX_CONFIG.credentials.client_id,
-        client_secret: CLUBFIX_CONFIG.credentials.client_secret
-      },
-      {
-        headers: {
-          'X-CREDENTIALS': getCredentialsHeader(),
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
-      }
+      requestBody,
+      { headers: requestHeaders }
     );
 
     const { access_token, expires_in } = response.data;
@@ -104,14 +113,34 @@ async function authenticate() {
     authToken.access_token = access_token;
     authToken.expires_at = Date.now() + (expires_in * 1000);
     
-    log('AUTENTICACAO REALIZADA COM SUCESSO!', 'success');
-    log(`Token expira em: ${expires_in} segundos`);
+    console.log('==> ✅ AUTENTICACAO REALIZADA COM SUCESSO!');
+    console.log(`==> Token: ${access_token.substring(0, 20)}...`);
+    console.log(`==> Expira em: ${expires_in} segundos`);
     console.log('='.repeat(60));
     
     return true;
   } catch (error) {
-    log(`ERRO NA AUTENTICACAO: ${error.response?.data?.message || error.message}`, 'error');
-    console.log('='.repeat(60));
+    console.error('='.repeat(60));
+    console.error('==> ❌ ERRO NA AUTENTICACAO:');
+    console.error('='.repeat(60));
+    console.error(`==> Status HTTP: ${error.response?.status}`);
+    console.error(`==> Status Text: ${error.response?.statusText}`);
+    console.error(`==> Mensagem: ${error.response?.data?.message || error.message}`);
+    console.error(`==> Error Code: ${error.code}`);
+    console.error('==> Dados da resposta:');
+    console.error(JSON.stringify(error.response?.data, null, 2));
+    console.error('==> Headers da resposta:');
+    console.error(JSON.stringify(error.response?.headers, null, 2));
+    console.error('==> Corpo da requisição enviado:');
+    console.error(JSON.stringify({
+      client_id: CLUBFIX_CONFIG.credentials.client_id,
+      client_secret: CLUBFIX_CONFIG.credentials.client_secret.substring(0, 10) + '...'
+    }, null, 2));
+    console.error('==> Headers da requisição:');
+    console.error('X-CREDENTIALS: ' + getCredentialsHeader().substring(0, 30) + '...');
+    console.error('Accept: application/json');
+    console.error('Content-Type: application/json');
+    console.error('='.repeat(60));
     return false;
   }
 }
@@ -870,7 +899,6 @@ app.listen(PORT, async () => {
   console.log('='.repeat(60));
   console.log('==> PROTEGMAIS BACKEND - API OFICIAL CLUBFIX');
   console.log('==> VERSAO SUPER COMPLETA v3.0');
-  console.log('==> 🚀 AMBIENTE DE PRODUCAO - 25+ MARCAS REAIS!');
   console.log('='.repeat(60));
   console.log(`==> Porta: ${PORT}`);
   console.log(`==> Ambiente: ${CLUBFIX_CONFIG.environment}`);
