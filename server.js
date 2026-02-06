@@ -1,34 +1,19 @@
 /**
  * ProtegMais - Backend API Oficial ClubFix
- * Versão: 16.2 - PRODUÇÃO ATIVA
+ * Versão: 16.4 - MULTI-AUTH (Testa múltiplos formatos)
  * 
- * CHANGELOG v16.2:
- * - Fix: buscar TODAS as marcas com limit=100
- * - Antes: GET /brands retornava apenas ~9 marcas (paginação padrão)
- * - Depois: GET /brands?limit=100 retorna 25+ marcas
+ * CHANGELOG v16.4:
+ * - Implementa múltiplos formatos de autenticação
+ * - Formato 1: email + password + client_id
+ * - Formato 2: email + password + client_id + client_secret
+ * - Formato 3: OAuth2 grant_type=password
+ * - Fallback automático se um formato falhar
  * 
- * CHANGELOG v16.1:
- * - Fix: endpoint de modelos corrigido
- * - Antes: POST /api/clubfix/brands/:id/models → 404 (endpoint não existe)
- * - Depois: GET /api/clubfix/models/:brandId → ✅ Funcionando
- * - ClubFix API usa GET /brands/:id que retorna { data: { ...brand, models: [...] } }
- * 
- * Funcionalidades:
- * - Autenticação OAuth2
- * - Marcas e Modelos de dispositivos (TODAS, sem paginação)
- * - Planos de assinatura
- * - Cotações
- * - Assinaturas
- * - Pagamentos
- * - Planos anuais
- * - Clientes
- * - Lojistas
- * - Cache inteligente
- * 
- * Tecnologias: Express, Axios, CORS
- * 
- * IMPORTANTE: Este arquivo usa APENAS credenciais de PRODUÇÃO
- * Ambiente forçado: PRODUÇÃO (sem fallback para homologação)
+ * Credenciais Oficiais Confirmadas:
+ * E-mail: kainow@clubfix.com.br
+ * Senha: Kainow@27923746
+ * Client ID: 2f6356ca-8089-4afc-aad8-c83b30ca1f3f
+ * Client Secret: CLUBFIX6986445f624d31770407007
  */
 
 const express = require('express');
@@ -42,31 +27,27 @@ const PORT = process.env.PORT || 10000;
 // CONFIGURAÇÃO - PRODUÇÃO ATIVA
 // ============================================
 
-const ENVIRONMENT = 'producao';
-
-const CLUBFIX_CONFIG = {
-  producao: {
-    baseURL: 'https://clubfix.com.br/webservice',
-    email: 'kainow@clubfix.com.br',
-    client_id: '2f6356ca-8089-4afc-aad8-c83b30ca1f3f',
-    client_secret: 'E>s_|aKA97qCF23M',
-    environment: 'PRODUCAO',
-    expectedBrands: '25+'
-  }
+const CONFIG = {
+  baseURL: 'https://clubfix.com.br/webservice',
+  email: 'kainow@clubfix.com.br',
+  password: 'Kainow@27923746',
+  client_id: '2f6356ca-8089-4afc-aad8-c83b30ca1f3f',
+  client_secret: 'CLUBFIX6986445f624d31770407007',
+  environment: 'PRODUCAO',
+  expectedBrands: '25+'
 };
 
-const CONFIG = CLUBFIX_CONFIG[ENVIRONMENT];
-
 console.log('\n' + '='.repeat(60));
-console.log('🚀 BACKEND PROTEGMAIS - VERSÃO 16.2 - PRODUÇÃO');
+console.log('🚀 BACKEND PROTEGMAIS - VERSÃO 16.4 - MULTI-AUTH');
 console.log('='.repeat(60));
 console.log(`📍 URL Pública: https://protegmais.onrender.com`);
-console.log(`🔐 Credenciais de PRODUÇÃO configuradas`);
+console.log(`🔐 Credenciais OFICIAIS configuradas`);
 console.log(`📧 E-mail: ${CONFIG.email}`);
 console.log(`🆔 Cliente ID: ${CONFIG.client_id}`);
 console.log(`🌐 ClubFix WebService: ${CONFIG.baseURL}`);
 console.log(`🏢 Ambiente: ${CONFIG.environment}`);
 console.log(`📦 Marcas esperadas: ${CONFIG.expectedBrands}`);
+console.log(`🧪 Modo: MULTI-AUTH (testa vários formatos)`);
 console.log('='.repeat(60) + '\n');
 
 // ============================================
@@ -77,48 +58,213 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================
-// AUTENTICAÇÃO
+// AUTENTICAÇÃO MULTI-FORMATO
 // ============================================
 
 let authToken = null;
 
-async function authenticate() {
-  try {
-    console.log(`\n🔐 Autenticando com ClubFix...`);
-    console.log(`📧 E-mail: ${CONFIG.email}`);
-    console.log(`🔑 Client ID: ${CONFIG.client_id}`);
+async function authenticateFormat1() {
+  console.log(`\n🧪 [FORMATO 1] Testando: email + password + client_id`);
+  
+  const payload = {
+    email: CONFIG.email,
+    password: CONFIG.password,
+    client_id: CONFIG.client_id
+  };
 
+  console.log(`📤 Payload: ${JSON.stringify(payload, null, 2)}`);
+
+  try {
     const response = await axios.post(
       `${CONFIG.baseURL}/auth/login`,
-      {
-        email: CONFIG.email,
-        password: CONFIG.client_secret,
-        client_id: CONFIG.client_id
-      },
-      {
-        headers: { 'Content-Type': 'application/json' }
+      payload,
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+
+    if (response.data && response.data.data && response.data.data.access_token) {
+      console.log(`✅ [FORMATO 1] Sucesso!`);
+      return response.data.data;
+    }
+    
+    throw new Error('Resposta inválida');
+  } catch (error) {
+    console.log(`❌ [FORMATO 1] Falhou: ${error.response?.data?.mensagem || error.message}`);
+    return null;
+  }
+}
+
+async function authenticateFormat2() {
+  console.log(`\n🧪 [FORMATO 2] Testando: email + password + client_id + client_secret`);
+  
+  const payload = {
+    email: CONFIG.email,
+    password: CONFIG.password,
+    client_id: CONFIG.client_id,
+    client_secret: CONFIG.client_secret
+  };
+
+  console.log(`📤 Payload: ${JSON.stringify({...payload, client_secret: '***'}, null, 2)}`);
+
+  try {
+    const response = await axios.post(
+      `${CONFIG.baseURL}/auth/login`,
+      payload,
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+
+    if (response.data && response.data.data && response.data.data.access_token) {
+      console.log(`✅ [FORMATO 2] Sucesso!`);
+      return response.data.data;
+    }
+    
+    throw new Error('Resposta inválida');
+  } catch (error) {
+    console.log(`❌ [FORMATO 2] Falhou: ${error.response?.data?.mensagem || error.message}`);
+    return null;
+  }
+}
+
+async function authenticateFormat3() {
+  console.log(`\n🧪 [FORMATO 3] Testando: OAuth2 grant_type=password`);
+  
+  const payload = {
+    grant_type: 'password',
+    username: CONFIG.email,
+    password: CONFIG.password,
+    client_id: CONFIG.client_id,
+    client_secret: CONFIG.client_secret
+  };
+
+  console.log(`📤 Payload: ${JSON.stringify({...payload, password: '***', client_secret: '***'}, null, 2)}`);
+
+  try {
+    const response = await axios.post(
+      `${CONFIG.baseURL}/auth/login`,
+      payload,
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+
+    if (response.data && response.data.access_token) {
+      console.log(`✅ [FORMATO 3] Sucesso!`);
+      return {
+        access_token: response.data.access_token,
+        expires_at: response.data.expires_at || new Date(Date.now() + 3600000).toISOString()
+      };
+    }
+    
+    throw new Error('Resposta inválida');
+  } catch (error) {
+    console.log(`❌ [FORMATO 3] Falhou: ${error.response?.data?.mensagem || error.message}`);
+    return null;
+  }
+}
+
+async function authenticateFormat4() {
+  console.log(`\n🧪 [FORMATO 4] Testando: Basic Auth + Body`);
+  
+  const basicAuth = Buffer.from(`${CONFIG.client_id}:${CONFIG.client_secret}`).toString('base64');
+  
+  const payload = {
+    email: CONFIG.email,
+    password: CONFIG.password
+  };
+
+  console.log(`📤 Headers: Authorization: Basic ${basicAuth.substring(0, 20)}...`);
+  console.log(`📤 Payload: ${JSON.stringify({...payload, password: '***'}, null, 2)}`);
+
+  try {
+    const response = await axios.post(
+      `${CONFIG.baseURL}/auth/login`,
+      payload,
+      { 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${basicAuth}`
+        } 
       }
     );
 
-    if (response.data && response.data.data) {
-      authToken = {
-        access_token: response.data.data.access_token,
-        expires_at: response.data.data.expires_at
-      };
+    if (response.data && response.data.data && response.data.data.access_token) {
+      console.log(`✅ [FORMATO 4] Sucesso!`);
+      return response.data.data;
+    }
+    
+    throw new Error('Resposta inválida');
+  } catch (error) {
+    console.log(`❌ [FORMATO 4] Falhou: ${error.response?.data?.mensagem || error.message}`);
+    return null;
+  }
+}
 
-      const expiresDate = new Date(authToken.expires_at);
-      console.log(`✅ Autenticação bem-sucedida!`);
-      console.log(`🎫 Token expira em: ${expiresDate.toLocaleString('pt-BR')}`);
-      console.log(`⏰ Válido até: ${expiresDate.toISOString()}`);
+async function authenticate() {
+  try {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🔐 INICIANDO AUTENTICAÇÃO MULTI-FORMATO`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`📧 E-mail: ${CONFIG.email}`);
+    console.log(`🔑 Client ID: ${CONFIG.client_id}`);
+    console.log(`🕐 Timestamp: ${new Date().toISOString()}`);
 
+    // Testar formato 1
+    let result = await authenticateFormat1();
+    if (result) {
+      authToken = result;
+      console.log(`\n✅ AUTENTICAÇÃO BEM-SUCEDIDA COM FORMATO 1!`);
+      logTokenInfo();
       return authToken;
     }
 
-    throw new Error('Resposta de autenticação inválida');
+    // Testar formato 2
+    result = await authenticateFormat2();
+    if (result) {
+      authToken = result;
+      console.log(`\n✅ AUTENTICAÇÃO BEM-SUCEDIDA COM FORMATO 2!`);
+      logTokenInfo();
+      return authToken;
+    }
+
+    // Testar formato 3
+    result = await authenticateFormat3();
+    if (result) {
+      authToken = result;
+      console.log(`\n✅ AUTENTICAÇÃO BEM-SUCEDIDA COM FORMATO 3!`);
+      logTokenInfo();
+      return authToken;
+    }
+
+    // Testar formato 4
+    result = await authenticateFormat4();
+    if (result) {
+      authToken = result;
+      console.log(`\n✅ AUTENTICAÇÃO BEM-SUCEDIDA COM FORMATO 4!`);
+      logTokenInfo();
+      return authToken;
+    }
+
+    // Nenhum formato funcionou
+    throw new Error('Todos os formatos de autenticação falharam');
+
   } catch (error) {
-    console.error('❌ Erro na autenticação:', error.response?.data || error.message);
+    console.error(`\n${'='.repeat(60)}`);
+    console.error('❌ ERRO CRÍTICO: AUTENTICAÇÃO FALHOU EM TODOS OS FORMATOS');
+    console.error(`${'='.repeat(60)}`);
+    console.error(`🚨 Erro: ${error.message}`);
+    console.error(`\n⚠️ AÇÕES NECESSÁRIAS:`);
+    console.error(`1. Verificar se as credenciais estão corretas`);
+    console.error(`2. Verificar se a conta está ativa no painel ClubFix`);
+    console.error(`3. Entrar em contato com suporte ClubFix`);
+    console.error(`4. Verificar documentação da API para formato correto`);
+    console.error(`${'='.repeat(60)}\n`);
     throw error;
   }
+}
+
+function logTokenInfo() {
+  const expiresDate = new Date(authToken.expires_at);
+  console.log(`🎫 Token: ${authToken.access_token.substring(0, 50)}...`);
+  console.log(`⏰ Expira em: ${expiresDate.toLocaleString('pt-BR')}`);
+  console.log(`📅 ISO: ${authToken.expires_at}`);
+  console.log(`${'='.repeat(60)}\n`);
 }
 
 function isTokenValid() {
@@ -182,6 +328,7 @@ app.get('/health', async (req, res) => {
   
   res.json({
     status: 'ok',
+    version: '16.4-multi-auth',
     timestamp: new Date().toISOString(),
     environment: CONFIG.environment,
     baseURL: CONFIG.baseURL,
@@ -200,15 +347,14 @@ app.get('/health', async (req, res) => {
   });
 });
 
-// Listar TODAS as marcas (SEM paginação)
+// Listar TODAS as marcas
 app.get('/api/clubfix/brands', async (req, res) => {
   try {
     console.log('\n📱 LISTAGEM DE MARCAS');
 
-    // Cache hit
     if (cache.brands && cache.lastUpdate) {
       const cacheAge = Date.now() - new Date(cache.lastUpdate).getTime();
-      if (cacheAge < 3600000) { // 1 hora
+      if (cacheAge < 3600000) {
         console.log(`✅ Retornando marcas do cache (${cache.brands.length} marcas)`);
         return res.json({
           success: true,
@@ -219,7 +365,6 @@ app.get('/api/clubfix/brands', async (req, res) => {
       }
     }
 
-    // Buscar TODAS as marcas com limit=100
     const response = await makeAuthenticatedRequest('GET', '/brands?limit=100');
 
     if (response && response.data) {
@@ -252,7 +397,6 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
     const { brandId } = req.params;
     console.log(`\n📱 LISTAGEM DE MODELOS - Marca ID: ${brandId}`);
 
-    // Cache hit
     if (cache.models[brandId]) {
       console.log(`✅ Retornando modelos do cache (${cache.models[brandId].length} modelos)`);
       return res.json({
@@ -263,7 +407,6 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
       });
     }
 
-    // ClubFix API: GET /brands/:id retorna { data: { ...brand, models: [...] } }
     const response = await makeAuthenticatedRequest('GET', `/brands/${brandId}`);
 
     if (response && response.data && response.data.models) {
@@ -360,12 +503,11 @@ app.listen(PORT, async () => {
   console.log(`🔗 ClubFix: ${CONFIG.baseURL}`);
   console.log('='.repeat(60) + '\n');
 
-  // Autenticar na inicialização
   try {
     await authenticate();
     console.log('\n🎉 Sistema pronto para uso!\n');
   } catch (error) {
-    console.error('\n⚠️  Falha na autenticação inicial. O sistema tentará autenticar na primeira requisição.\n');
+    console.error('\n⚠️ Falha na autenticação inicial. O sistema tentará autenticar na primeira requisição.\n');
   }
 });
 
