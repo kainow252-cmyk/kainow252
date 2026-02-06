@@ -1,19 +1,14 @@
 /**
  * ProtegMais - Backend API Oficial ClubFix
- * Versão: 16.4 - MULTI-AUTH (Testa múltiplos formatos)
+ * Versão: 17.0 - TOKEN DE INTEGRAÇÃO DIRETO
  * 
- * CHANGELOG v16.4:
- * - Implementa múltiplos formatos de autenticação
- * - Formato 1: email + password + client_id
- * - Formato 2: email + password + client_id + client_secret
- * - Formato 3: OAuth2 grant_type=password
- * - Fallback automático se um formato falhar
+ * CHANGELOG v17.0:
+ * - Usa token de integração fornecido pelo TI ClubFix
+ * - Sem necessidade de autenticação OAuth2
+ * - Token fixo no header Authorization
  * 
- * Credenciais Oficiais Confirmadas:
- * E-mail: kainow@clubfix.com.br
- * Senha: Kainow@27923746
- * Client ID: 2f6356ca-8089-4afc-aad8-c83b30ca1f3f
- * Client Secret: CLUBFIX6986445f624d31770407007
+ * Token de Integração fornecido pelo TI ClubFix:
+ * $2y$10$pt5q/GMnEBvAVBVYgrYk1.Wo8w5Y1tk2kqtPWRv.QJIRz24aNdlca
  */
 
 const express = require('express');
@@ -24,30 +19,29 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 // ============================================
-// CONFIGURAÇÃO - PRODUÇÃO ATIVA
+// CONFIGURAÇÃO - PRODUÇÃO COM TOKEN DIRETO
 // ============================================
 
 const CONFIG = {
   baseURL: 'https://clubfix.com.br/webservice',
+  integrationToken: '$2y$10$pt5q/GMnEBvAVBVYgrYk1.Wo8w5Y1tk2kqtPWRv.QJIRz24aNdlca',
   email: 'kainow@clubfix.com.br',
-  password: 'Kainow@27923746',
   client_id: '2f6356ca-8089-4afc-aad8-c83b30ca1f3f',
-  client_secret: 'CLUBFIX6986445f624d31770407007',
   environment: 'PRODUCAO',
   expectedBrands: '25+'
 };
 
 console.log('\n' + '='.repeat(60));
-console.log('🚀 BACKEND PROTEGMAIS - VERSÃO 16.4 - MULTI-AUTH');
+console.log('🚀 BACKEND PROTEGMAIS - VERSÃO 17.0 - TOKEN DIRETO');
 console.log('='.repeat(60));
 console.log(`📍 URL Pública: https://protegmais.onrender.com`);
-console.log(`🔐 Credenciais OFICIAIS configuradas`);
+console.log(`🔐 Usando TOKEN DE INTEGRAÇÃO do TI ClubFix`);
 console.log(`📧 E-mail: ${CONFIG.email}`);
 console.log(`🆔 Cliente ID: ${CONFIG.client_id}`);
 console.log(`🌐 ClubFix WebService: ${CONFIG.baseURL}`);
 console.log(`🏢 Ambiente: ${CONFIG.environment}`);
 console.log(`📦 Marcas esperadas: ${CONFIG.expectedBrands}`);
-console.log(`🧪 Modo: MULTI-AUTH (testa vários formatos)`);
+console.log(`🔑 Token: ${CONFIG.integrationToken.substring(0, 20)}...`);
 console.log('='.repeat(60) + '\n');
 
 // ============================================
@@ -58,240 +52,19 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================
-// AUTENTICAÇÃO MULTI-FORMATO
+// REQUISIÇÕES COM TOKEN DIRETO
 // ============================================
 
-let authToken = null;
-
-async function authenticateFormat1() {
-  console.log(`\n🧪 [FORMATO 1] Testando: email + password + client_id`);
-  
-  const payload = {
-    email: CONFIG.email,
-    password: CONFIG.password,
-    client_id: CONFIG.client_id
-  };
-
-  console.log(`📤 Payload: ${JSON.stringify(payload, null, 2)}`);
-
-  try {
-    const response = await axios.post(
-      `${CONFIG.baseURL}/auth/login`,
-      payload,
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-
-    if (response.data && response.data.data && response.data.data.access_token) {
-      console.log(`✅ [FORMATO 1] Sucesso!`);
-      return response.data.data;
-    }
-    
-    throw new Error('Resposta inválida');
-  } catch (error) {
-    console.log(`❌ [FORMATO 1] Falhou: ${error.response?.data?.mensagem || error.message}`);
-    return null;
-  }
-}
-
-async function authenticateFormat2() {
-  console.log(`\n🧪 [FORMATO 2] Testando: email + password + client_id + client_secret`);
-  
-  const payload = {
-    email: CONFIG.email,
-    password: CONFIG.password,
-    client_id: CONFIG.client_id,
-    client_secret: CONFIG.client_secret
-  };
-
-  console.log(`📤 Payload: ${JSON.stringify({...payload, client_secret: '***'}, null, 2)}`);
-
-  try {
-    const response = await axios.post(
-      `${CONFIG.baseURL}/auth/login`,
-      payload,
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-
-    if (response.data && response.data.data && response.data.data.access_token) {
-      console.log(`✅ [FORMATO 2] Sucesso!`);
-      return response.data.data;
-    }
-    
-    throw new Error('Resposta inválida');
-  } catch (error) {
-    console.log(`❌ [FORMATO 2] Falhou: ${error.response?.data?.mensagem || error.message}`);
-    return null;
-  }
-}
-
-async function authenticateFormat3() {
-  console.log(`\n🧪 [FORMATO 3] Testando: OAuth2 grant_type=password`);
-  
-  const payload = {
-    grant_type: 'password',
-    username: CONFIG.email,
-    password: CONFIG.password,
-    client_id: CONFIG.client_id,
-    client_secret: CONFIG.client_secret
-  };
-
-  console.log(`📤 Payload: ${JSON.stringify({...payload, password: '***', client_secret: '***'}, null, 2)}`);
-
-  try {
-    const response = await axios.post(
-      `${CONFIG.baseURL}/auth/login`,
-      payload,
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-
-    if (response.data && response.data.access_token) {
-      console.log(`✅ [FORMATO 3] Sucesso!`);
-      return {
-        access_token: response.data.access_token,
-        expires_at: response.data.expires_at || new Date(Date.now() + 3600000).toISOString()
-      };
-    }
-    
-    throw new Error('Resposta inválida');
-  } catch (error) {
-    console.log(`❌ [FORMATO 3] Falhou: ${error.response?.data?.mensagem || error.message}`);
-    return null;
-  }
-}
-
-async function authenticateFormat4() {
-  console.log(`\n🧪 [FORMATO 4] Testando: Basic Auth + Body`);
-  
-  const basicAuth = Buffer.from(`${CONFIG.client_id}:${CONFIG.client_secret}`).toString('base64');
-  
-  const payload = {
-    email: CONFIG.email,
-    password: CONFIG.password
-  };
-
-  console.log(`📤 Headers: Authorization: Basic ${basicAuth.substring(0, 20)}...`);
-  console.log(`📤 Payload: ${JSON.stringify({...payload, password: '***'}, null, 2)}`);
-
-  try {
-    const response = await axios.post(
-      `${CONFIG.baseURL}/auth/login`,
-      payload,
-      { 
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Basic ${basicAuth}`
-        } 
-      }
-    );
-
-    if (response.data && response.data.data && response.data.data.access_token) {
-      console.log(`✅ [FORMATO 4] Sucesso!`);
-      return response.data.data;
-    }
-    
-    throw new Error('Resposta inválida');
-  } catch (error) {
-    console.log(`❌ [FORMATO 4] Falhou: ${error.response?.data?.mensagem || error.message}`);
-    return null;
-  }
-}
-
-async function authenticate() {
-  try {
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`🔐 INICIANDO AUTENTICAÇÃO MULTI-FORMATO`);
-    console.log(`${'='.repeat(60)}`);
-    console.log(`📧 E-mail: ${CONFIG.email}`);
-    console.log(`🔑 Client ID: ${CONFIG.client_id}`);
-    console.log(`🕐 Timestamp: ${new Date().toISOString()}`);
-
-    // Testar formato 1
-    let result = await authenticateFormat1();
-    if (result) {
-      authToken = result;
-      console.log(`\n✅ AUTENTICAÇÃO BEM-SUCEDIDA COM FORMATO 1!`);
-      logTokenInfo();
-      return authToken;
-    }
-
-    // Testar formato 2
-    result = await authenticateFormat2();
-    if (result) {
-      authToken = result;
-      console.log(`\n✅ AUTENTICAÇÃO BEM-SUCEDIDA COM FORMATO 2!`);
-      logTokenInfo();
-      return authToken;
-    }
-
-    // Testar formato 3
-    result = await authenticateFormat3();
-    if (result) {
-      authToken = result;
-      console.log(`\n✅ AUTENTICAÇÃO BEM-SUCEDIDA COM FORMATO 3!`);
-      logTokenInfo();
-      return authToken;
-    }
-
-    // Testar formato 4
-    result = await authenticateFormat4();
-    if (result) {
-      authToken = result;
-      console.log(`\n✅ AUTENTICAÇÃO BEM-SUCEDIDA COM FORMATO 4!`);
-      logTokenInfo();
-      return authToken;
-    }
-
-    // Nenhum formato funcionou
-    throw new Error('Todos os formatos de autenticação falharam');
-
-  } catch (error) {
-    console.error(`\n${'='.repeat(60)}`);
-    console.error('❌ ERRO CRÍTICO: AUTENTICAÇÃO FALHOU EM TODOS OS FORMATOS');
-    console.error(`${'='.repeat(60)}`);
-    console.error(`🚨 Erro: ${error.message}`);
-    console.error(`\n⚠️ AÇÕES NECESSÁRIAS:`);
-    console.error(`1. Verificar se as credenciais estão corretas`);
-    console.error(`2. Verificar se a conta está ativa no painel ClubFix`);
-    console.error(`3. Entrar em contato com suporte ClubFix`);
-    console.error(`4. Verificar documentação da API para formato correto`);
-    console.error(`${'='.repeat(60)}\n`);
-    throw error;
-  }
-}
-
-function logTokenInfo() {
-  const expiresDate = new Date(authToken.expires_at);
-  console.log(`🎫 Token: ${authToken.access_token.substring(0, 50)}...`);
-  console.log(`⏰ Expira em: ${expiresDate.toLocaleString('pt-BR')}`);
-  console.log(`📅 ISO: ${authToken.expires_at}`);
-  console.log(`${'='.repeat(60)}\n`);
-}
-
-function isTokenValid() {
-  if (!authToken || !authToken.expires_at) return false;
-  const now = new Date();
-  const expiresAt = new Date(authToken.expires_at);
-  return now < expiresAt;
-}
-
-async function ensureAuthenticated() {
-  if (!isTokenValid()) {
-    console.log('🔄 Token expirado ou inválido. Renovando...');
-    await authenticate();
-  }
-  return authToken.access_token;
-}
-
-async function makeAuthenticatedRequest(method, endpoint, data = null) {
-  const token = await ensureAuthenticated();
-
+async function makeRequest(method, endpoint, data = null) {
   const config = {
     method,
     url: `${CONFIG.baseURL}${endpoint}`,
     headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    }
+      'Authorization': `Bearer ${CONFIG.integrationToken}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    timeout: 10000
   };
 
   if (data) {
@@ -299,12 +72,93 @@ async function makeAuthenticatedRequest(method, endpoint, data = null) {
   }
 
   try {
+    console.log(`📡 Requisição: ${method} ${endpoint}`);
     const response = await axios(config);
+    console.log(`✅ Sucesso: ${response.status}`);
     return response.data;
   } catch (error) {
-    console.error(`❌ Erro na requisição ${method} ${endpoint}:`, error.response?.data || error.message);
+    console.error(`❌ Erro: ${method} ${endpoint}`);
+    console.error(`   Status: ${error.response?.status}`);
+    console.error(`   Mensagem: ${error.response?.data?.mensagem || error.message}`);
     throw error;
   }
+}
+
+// Testar conexão
+async function testConnection() {
+  console.log('\n🧪 TESTANDO CONEXÃO COM CLUBFIX...\n');
+  
+  // Teste 1: Endpoint /brands
+  try {
+    console.log('📝 Teste 1: GET /brands?limit=100');
+    const response = await makeRequest('GET', '/brands?limit=100');
+    
+    if (response && response.data) {
+      console.log(`✅ SUCESSO! ${response.data.length} marcas encontradas`);
+      return true;
+    }
+  } catch (error) {
+    console.log('❌ Teste 1 falhou');
+  }
+
+  // Teste 2: Endpoint alternativo /api/brands
+  try {
+    console.log('\n📝 Teste 2: GET /api/brands?limit=100');
+    const response = await makeRequest('GET', '/api/brands?limit=100');
+    
+    if (response && response.data) {
+      console.log(`✅ SUCESSO! ${response.data.length} marcas encontradas`);
+      return true;
+    }
+  } catch (error) {
+    console.log('❌ Teste 2 falhou');
+  }
+
+  // Teste 3: Com header X-API-Key
+  try {
+    console.log('\n📝 Teste 3: GET /brands com X-API-Key');
+    const response = await axios.get(`${CONFIG.baseURL}/brands?limit=100`, {
+      headers: {
+        'X-API-Key': CONFIG.integrationToken,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      }
+    });
+    
+    if (response && response.data) {
+      console.log(`✅ SUCESSO! ${response.data.data?.length || 0} marcas encontradas`);
+      return true;
+    }
+  } catch (error) {
+    console.log('❌ Teste 3 falhou');
+  }
+
+  // Teste 4: Com header Authorization (sem Bearer)
+  try {
+    console.log('\n📝 Teste 4: GET /brands com Authorization (sem Bearer)');
+    const response = await axios.get(`${CONFIG.baseURL}/brands?limit=100`, {
+      headers: {
+        'Authorization': CONFIG.integrationToken,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      }
+    });
+    
+    if (response && response.data) {
+      console.log(`✅ SUCESSO! ${response.data.data?.length || 0} marcas encontradas`);
+      return true;
+    }
+  } catch (error) {
+    console.log('❌ Teste 4 falhou');
+  }
+
+  console.log('\n❌ TODOS OS TESTES FALHARAM');
+  console.log('⚠️  Entre em contato com TI ClubFix para confirmar:');
+  console.log('   1. Token está correto e ativo?');
+  console.log('   2. Qual o formato correto do header?');
+  console.log('   3. Qual o endpoint correto?');
+  
+  return false;
 }
 
 // ============================================
@@ -324,18 +178,13 @@ const cache = {
 
 // Health Check
 app.get('/health', async (req, res) => {
-  const authenticated = isTokenValid();
-  
   res.json({
     status: 'ok',
-    version: '16.4-multi-auth',
+    version: '17.0-token-direto',
     timestamp: new Date().toISOString(),
     environment: CONFIG.environment,
     baseURL: CONFIG.baseURL,
-    auth: {
-      authenticated,
-      tokenValid: authenticated
-    },
+    tokenConfigured: !!CONFIG.integrationToken,
     expectedBrands: CONFIG.expectedBrands,
     cache: {
       brands: cache.brands?.length || 0,
@@ -343,7 +192,7 @@ app.get('/health', async (req, res) => {
       plans: !!cache.plans,
       lastUpdate: cache.lastUpdate
     },
-    message: `🏆 Ambiente de ${CONFIG.environment} ativo - ${CONFIG.expectedBrands} marcas disponíveis!`
+    message: `🏆 Token de integração configurado - ${CONFIG.expectedBrands} marcas disponíveis!`
   });
 });
 
@@ -352,9 +201,10 @@ app.get('/api/clubfix/brands', async (req, res) => {
   try {
     console.log('\n📱 LISTAGEM DE MARCAS');
 
+    // Cache hit
     if (cache.brands && cache.lastUpdate) {
       const cacheAge = Date.now() - new Date(cache.lastUpdate).getTime();
-      if (cacheAge < 3600000) {
+      if (cacheAge < 3600000) { // 1 hora
         console.log(`✅ Retornando marcas do cache (${cache.brands.length} marcas)`);
         return res.json({
           success: true,
@@ -365,7 +215,8 @@ app.get('/api/clubfix/brands', async (req, res) => {
       }
     }
 
-    const response = await makeAuthenticatedRequest('GET', '/brands?limit=100');
+    // Buscar marcas
+    const response = await makeRequest('GET', '/brands?limit=100');
 
     if (response && response.data) {
       cache.brands = response.data;
@@ -397,6 +248,7 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
     const { brandId } = req.params;
     console.log(`\n📱 LISTAGEM DE MODELOS - Marca ID: ${brandId}`);
 
+    // Cache hit
     if (cache.models[brandId]) {
       console.log(`✅ Retornando modelos do cache (${cache.models[brandId].length} modelos)`);
       return res.json({
@@ -407,7 +259,8 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
       });
     }
 
-    const response = await makeAuthenticatedRequest('GET', `/brands/${brandId}`);
+    // Buscar modelos
+    const response = await makeRequest('GET', `/brands/${brandId}`);
 
     if (response && response.data && response.data.models) {
       const models = response.data.models;
@@ -447,7 +300,7 @@ app.get('/api/clubfix/quotation', async (req, res) => {
 
     console.log(`\n💰 COTAÇÃO - Plano: ${plan_id}, Modelo: ${model_id}, Ano: ${year}`);
 
-    const response = await makeAuthenticatedRequest(
+    const response = await makeRequest(
       'GET',
       `/quotation?plan_id=${plan_id}&model_id=${model_id}&year=${year}`
     );
@@ -473,7 +326,7 @@ app.post('/api/clubfix/subscriptions', async (req, res) => {
     console.log('\n📝 CRIAR ASSINATURA');
     console.log('Dados recebidos:', JSON.stringify(req.body, null, 2));
 
-    const response = await makeAuthenticatedRequest('POST', '/subscriptions', req.body);
+    const response = await makeRequest('POST', '/subscriptions', req.body);
 
     console.log('✅ Assinatura criada com sucesso!');
     console.log('ID:', response.data?.id);
@@ -503,11 +356,16 @@ app.listen(PORT, async () => {
   console.log(`🔗 ClubFix: ${CONFIG.baseURL}`);
   console.log('='.repeat(60) + '\n');
 
+  // Testar conexão
   try {
-    await authenticate();
-    console.log('\n🎉 Sistema pronto para uso!\n');
+    const success = await testConnection();
+    if (success) {
+      console.log('\n🎉 Sistema pronto para uso!\n');
+    } else {
+      console.log('\n⚠️  Sistema rodando mas aguardando confirmação do TI ClubFix.\n');
+    }
   } catch (error) {
-    console.error('\n⚠️ Falha na autenticação inicial. O sistema tentará autenticar na primeira requisição.\n');
+    console.error('\n⚠️  Erro ao testar conexão. Verifique com TI ClubFix.\n');
   }
 });
 
