@@ -71,13 +71,56 @@ class ClubFixServiceV2 {
     async authenticate() {
         try {
             console.log('🔐 Autenticando na API ClubFix...');
+            console.log('   Client ID:', this.clientId ? 'Configurado' : 'FALTANDO');
+            console.log('   Client Secret:', this.clientSecret ? 'Configurado' : 'FALTANDO');
             
-            const response = await this.client.post('/api-reference/auth', {
-                client_id: this.clientId,
-                client_secret: this.clientSecret
-            });
+            // Tentar múltiplos endpoints de autenticação
+            const authEndpoints = [
+                '/auth/login',
+                '/api-reference/auth',
+                '/auth'
+            ];
+            
+            let response = null;
+            let lastError = null;
+            
+            for (const endpoint of authEndpoints) {
+                try {
+                    console.log(`🔍 Tentando autenticação em: ${endpoint}`);
+                    
+                    response = await this.client.post(endpoint, {
+                        client_id: this.clientId,
+                        client_secret: this.clientSecret
+                    });
+                    
+                    console.log(`✅ Autenticação funcionou em: ${endpoint}`);
+                    break;
+                } catch (error) {
+                    console.log(`❌ Endpoint ${endpoint} falhou:`, error.response?.status || error.message);
+                    if (error.response?.data) {
+                        console.log('   Resposta:', JSON.stringify(error.response.data));
+                    }
+                    lastError = error;
+                }
+            }
+            
+            if (!response) {
+                console.error('❌ Nenhum endpoint de autenticação funcionou');
+                console.error('   Último erro:', lastError.message);
+                if (lastError.response) {
+                    console.error('   Status:', lastError.response.status);
+                    console.error('   Dados:', lastError.response.data);
+                }
+                throw lastError;
+            }
             
             const { access_token, expires_in } = response.data;
+            
+            if (!access_token) {
+                console.error('❌ Token não retornado pela API');
+                console.error('   Resposta:', response.data);
+                throw new Error('Token não retornado pela API ClubFix');
+            }
             
             // Calcular tempo de expiração (com margem de segurança de 5 minutos)
             const expiresAt = Date.now() + ((expires_in - 300) * 1000);
@@ -96,10 +139,9 @@ class ClubFixServiceV2 {
             return true;
         } catch (error) {
             console.error('❌ Erro na autenticação:', error.message);
-            if (error.response) {
-                console.error('   Status:', error.response.status);
-                console.error('   Dados:', error.response.data);
-            }
+            console.error('   Base URL:', this.baseURL);
+            console.error('   Client ID presente:', !!this.clientId);
+            console.error('   Client Secret presente:', !!this.clientSecret);
             throw new Error('Falha na autenticação com ClubFix API');
         }
     }
@@ -199,15 +241,9 @@ class ClubFixServiceV2 {
                 throw lastError || new Error('Nenhum endpoint de modelos funcionou');
             }
             
-            // Extrair modelos (pode estar em data.data ou data.models)
-            let modelsData = response.data.data;
-            if (!modelsData && response.data.models) {
-                modelsData = response.data.models;
-            }
-            
-            const models = modelsData.map(model => ({
+            const models = response.data.data.map(model => ({
                 id: model.id,
-                brandId: model.brand_id || brandId,
+                brandId: model.brand_id,
                 name: model.name,
                 lmi: parseFloat(model.lmi || 0),
                 status: model.status
@@ -302,23 +338,23 @@ class ClubFixServiceV2 {
                 throw lastError || new Error('Nenhum endpoint de cotação funcionou');
             }
             
-            const quotationData = response.data.data || response.data;
+            const quotationData = response.data.data;
             
             const quotation = {
                 model: {
-                    id: quotationData.model?.id || modelId,
-                    name: quotationData.model?.name || 'N/A',
-                    brand: quotationData.model?.brand || 'N/A',
-                    lmi: parseFloat(quotationData.model?.lmi || 0)
+                    id: quotationData.model.id,
+                    name: quotationData.model.name,
+                    brand: quotationData.model.brand,
+                    lmi: parseFloat(quotationData.model.lmi || 0)
                 },
-                plans: (quotationData.plans || []).map(plan => ({
+                plans: quotationData.plans.map(plan => ({
                     id: plan.id,
                     name: plan.name,
-                    monthlyPrice: parseFloat(plan.monthly_price || plan.monthlyPrice || 0),
-                    annualPrice: parseFloat(plan.annual_price || plan.annualPrice || 0),
-                    franchisePercentage: parseFloat(plan.franchise_percentage || plan.franchisePercentage || 0),
+                    monthlyPrice: parseFloat(plan.monthly_price || 0),
+                    annualPrice: parseFloat(plan.annual_price || 0),
+                    franchisePercentage: parseFloat(plan.franchise_percentage || 0),
                     coverage: plan.coverage || [],
-                    lmi: parseFloat(plan.lmi || quotationData.model?.lmi || 0)
+                    lmi: parseFloat(plan.lmi || quotationData.model.lmi || 0)
                 }))
             };
             
@@ -390,6 +426,9 @@ class ClubFixServiceV2 {
         
         try {
             console.log('📝 Criando assinatura...');
+            console.log('   Cliente:', subscriptionData.customer_id);
+            console.log('   Plano:', subscriptionData.plan_id);
+            console.log('   Modelo:', subscriptionData.model_id);
             
             const response = await this.client.post('/api-reference/subscriptions/post', {
                 customer_id: subscriptionData.customer_id,
@@ -397,16 +436,31 @@ class ClubFixServiceV2 {
                 model_id: subscriptionData.model_id,
                 imei_1: subscriptionData.imei_1,
                 imei_2: subscriptionData.imei_2 || null,
-                invoice: subscriptionData.invoice || null,
                 is_used: subscriptionData.is_used || false,
-                purchase_date: subscriptionData.purchase_date || new Date().toISOString().split('T')[0]
+                observation: subscriptionData.observation || 'Contratado via ProtegMais'
             });
             
+            const subscription = response.data.data;
+            
             console.log('✅ Assinatura criada com sucesso');
-            return response.data.data;
+            console.log('   ID:', subscription.id);
+            console.log('   Status:', subscription.status);
+            
+            return {
+                id: subscription.id,
+                customerId: subscription.customer_id,
+                planId: subscription.plan_id,
+                modelId: subscription.model_id,
+                status: subscription.status,
+                monthlyPrice: parseFloat(subscription.monthly_price || 0),
+                annualPrice: parseFloat(subscription.annual_price || 0),
+                paymentUrl: subscription.payment_url || null,
+                createdAt: subscription.created_at
+            };
             
         } catch (error) {
             console.error('❌ Erro ao criar assinatura:', error.message);
+            console.error('   Detalhes:', error.response?.data);
             throw error;
         }
     }
@@ -459,11 +513,12 @@ class ClubFixServiceV2 {
             const response = await this.client.post('/api-reference/subscriptions/payment', {
                 subscription_id: subscriptionId,
                 payment_method: 'credit_card',
-                card_number: cardData.number,
-                card_holder: cardData.holder,
-                card_expiration: cardData.expiration,
-                card_cvv: cardData.cvv,
-                installments: cardData.installments || 1
+                card: {
+                    number: cardData.number,
+                    holder: cardData.holder,
+                    expiry: cardData.expiry,
+                    cvv: cardData.cvv
+                }
             });
             
             const payment = response.data.data;
@@ -475,30 +530,42 @@ class ClubFixServiceV2 {
                 subscriptionId: payment.subscription_id,
                 paymentMethod: payment.payment_method,
                 status: payment.status,
-                transactionId: payment.transaction_id
+                transactionId: payment.transaction_id,
+                message: payment.message
             };
             
         } catch (error) {
-            console.error('❌ Erro ao processar pagamento com cartão:', error.message);
+            console.error('❌ Erro ao processar pagamento:', error.message);
             throw error;
         }
     }
     
     /**
-     * 📊 OBTER ASSINATURA
+     * 📋 BUSCAR ASSINATURA
      */
     async getSubscription(subscriptionId) {
         await this.ensureAuthenticated();
         
         try {
-            console.log(`📊 Buscando assinatura ${subscriptionId}...`);
+            console.log(`📋 Buscando assinatura ${subscriptionId}...`);
             
             const response = await this.client.get('/api-reference/subscriptions/show', {
                 params: { id: subscriptionId }
             });
             
-            console.log('✅ Assinatura encontrada');
-            return response.data.data;
+            const subscription = response.data.data;
+            
+            return {
+                id: subscription.id,
+                customerId: subscription.customer_id
+                planId: subscription.plan_id,
+                modelId: subscription.model_id,
+                status: subscription.status,
+                monthlyPrice: parseFloat(subscription.monthly_price || 0),
+                annualPrice: parseFloat(subscription.annual_price || 0),
+                paymentStatus: subscription.payment_status,
+                createdAt: subscription.created_at
+            };
             
         } catch (error) {
             console.error('❌ Erro ao buscar assinatura:', error.message);
