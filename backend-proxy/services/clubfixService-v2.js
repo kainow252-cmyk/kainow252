@@ -49,9 +49,20 @@ class ClubFixServiceV2 {
     /**
      * 🔐 AUTENTICAÇÃO OAUTH 2.0
      */
+    getInfo() {
+    return {
+        baseURL: this.baseURL,
+        authenticated: !!this.token.accessToken,
+        tokenExpires: this.token.expiresAt ? new Date(this.token.expiresAt).toISOString() : null,
+        cacheStatus: {
+            brands: !!this.cache.brands,
+            modelsCount: Object.keys(this.cache.models).length,
+            plansCount: Object.keys(this.cache.plans).length
+        }
+    };
+}
     async authenticate() {
-        try {
-            console.log('🔐 Autenticando na API ClubFix...');
+        try {            console.log('🔐 Autenticando na API ClubFix...');
             
             const response = await this.client.post('/api-reference/auth', {
                 client_id: this.clientId,
