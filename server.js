@@ -538,7 +538,7 @@ app.post('/api/cache/clear', (req, res) => {
 
 app.listen(PORT, async () => {
   console.log('='.repeat(60));
-  console.log('==> 🏆 BACKEND PROTEGMAIS - VERSÃO 16.0 - PRODUÇÃO');
+  console.log('==> 🏆 BACKEND PROTEGMAIS - VERSÃO 18.3 - CACHE FIX');
   console.log('='.repeat(60));
   console.log(`==> Porta: ${PORT}`);
   console.log(`==> URL Pública: https://protegmais.onrender.com`);
