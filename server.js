@@ -1,6 +1,6 @@
 /**
  * ProtegMais Backend - API OFICIAL CLUBFIX
- * VERSÃO 18.3 - FIX CACHE: MODELOS POR MARCA CORRETOS
+ * VERSÃO 18.4 - ENDPOINT CORRETO: filter[brand] (DOCUMENTAÇÃO CLUBFIX)
  * 
  * ⚠️ CREDENCIAIS DE PRODUÇÃO CONFIGURADAS
  * ⚠️ Usa apenas ambiente de PRODUÇÃO (sem fallback)
@@ -406,12 +406,12 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
       log(`❌ Tentativa ${attemptNumber} FALHOU: ${error.response?.status || error.message}`);
     }
     
-    // TENTATIVA 2: /models?brand_id={id}
+    // TENTATIVA 2: /models?filter[brand]={id} (DOCUMENTAÇÃO OFICIAL CLUBFIX)
     if (models.length === 0) {
       attemptNumber++;
       try {
-        log(`🔄 Tentativa ${attemptNumber}: GET /models?brand_id=${brandId}`);
-        const response2 = await makeAuthenticatedRequest('GET', '/models', null, { brand_id: brandId });
+        log(`🔄 Tentativa ${attemptNumber}: GET /models?filter[brand]=${brandId} (CORRETO - DOCS CLUBFIX)`);
+        const response2 = await makeAuthenticatedRequest('GET', '/models', null, { 'filter[brand]': brandId });
         log(`📊 Status: ${response2.status}`);
         log(`📦 Estrutura: ${JSON.stringify(Object.keys(response2.data))}`);
         
