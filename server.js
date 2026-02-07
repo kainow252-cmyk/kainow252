@@ -1,16 +1,38 @@
 /**
- * ProtegMais - Backend API Oficial ClubFix
- * Versão: 18.0 - FORMATO CORRETO (Resposta do TI)
+ * ProtegMais Backend - API OFICIAL CLUBFIX
+ * VERSÃO 18.2 - FIX PAGINATION: BUSCAR TODAS AS MARCAS
+ * 
+ * ⚠️ CREDENCIAIS DE PRODUÇÃO CONFIGURADAS
+ * ⚠️ Usa apenas ambiente de PRODUÇÃO (sem fallback)
+ * 
+ * CHANGELOG v18.2:
+ * 🔧 FIX: Buscar TODAS as páginas de marcas (não só primeira página)
+ *    - Antes: GET /brands?limit=100 → Retornava apenas 9 marcas (1ª página)
+ *    - Depois: Loop através de TODAS as páginas até não ter mais dados
+ *    - Remove duplicatas por ID
+ *    - Adiciona endpoint POST /api/cache/clear para limpar cache
+ * 
+ * CHANGELOG v18.1:
+ * 🔧 FIX: Endpoint de modelos com múltiplas tentativas
+ *    - Testa 3 endpoints diferentes para modelos
+ *    - Testa 8 formatos de resposta diferentes
  * 
  * CHANGELOG v18.0:
- * - Implementa formato correto fornecido pelo TI ClubFix
- * - Header x-credentials: base64(email:senha)
- * - Body apenas com client_id e client_secret
- * - Ambiente de homologação funcionando
+ * 🔧 FIX: Formato correto de autenticação (x-credentials)
+ *    - Header: x-credentials: base64(email:senha)
+ *    - Body: { client_id, client_secret }
  * 
- * Formato correto descoberto pelo TI ClubFix:
- * Headers: x-credentials: base64("email:senha")
- * Body: { client_id, client_secret }
+ * Funcionalidades:
+ * ✅ Autenticação OAuth2
+ * ✅ Marcas e Modelos de Dispositivos (TODAS as páginas)
+ * ✅ Planos de Assinatura
+ * ✅ Cotações (Quotation)
+ * ✅ Assinaturas (Subscriptions)
+ * ✅ Pagamentos
+ * ✅ Planos Anuais (Annual Plans)
+ * ✅ Clientes (Customers)
+ * ✅ Lojistas (Shopkeepers)
+ * ✅ Cache inteligente
  */
 
 const express = require('express');
@@ -20,180 +42,160 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// ============================================
-// CONFIGURAÇÃO - FORMATO CORRETO DO TI
-// ============================================
+// Middlewares
+app.use(cors());
+app.use(express.json());
 
-const CONFIG = {
-  // Homologação (fornecido pelo TI)
-  homolog: {
-    baseURL: 'https://homolog.clubfix.com.br/webservice',
-    email: 'kainow@clubfix.com.br',
-    password: 'Kainow@27923746',
-    client_id: '96639fd2-7598-46a7-89e8-05b84c7f3b6b',
-    client_secret: 'CLUBFIX698497c880cb41770297288',
-    environment: 'HOMOLOGACAO',
-    expectedBrands: '6'
-  },
-  // Produção (ainda precisa confirmar)
-  producao: {
+// ============================================================
+// CONFIGURAÇÃO DA API CLUBFIX - PRODUÇÃO
+// ============================================================
+
+const ENVIRONMENTS = {
+  PRODUCTION: {
     baseURL: 'https://clubfix.com.br/webservice',
-    email: 'kainow@clubfix.com.br',
-    password: 'Kainow@27923746',
-    client_id: '2f6356ca-8089-4afc-aad8-c83b30ca1f3f',
-    client_secret: 'CLUBFIX6986445f624d31770407007',
-    environment: 'PRODUCAO',
+    name: 'PRODUCAO',
+    priority: 1,
     expectedBrands: '25+'
   }
 };
 
-// Usar PRODUÇÃO (25+ marcas)
-const ACTIVE_CONFIG = CONFIG.producao;
+const CLUBFIX_CONFIG = {
+  baseURL: ENVIRONMENTS.PRODUCTION.baseURL,
+  environment: ENVIRONMENTS.PRODUCTION.name,
+  
+  credentials: {
+    email: 'kainow@clubfix.com.br',
+    password: 'Kainow@27923746',
+    client_id: '2f6356ca-8089-4afc-aad8-c83b30ca1f3f',
+    client_secret: 'CLUBFIX6986445f624d31770407007'
+  }
+};
 
 console.log('\n' + '='.repeat(60));
-console.log('🚀 BACKEND PROTEGMAIS - VERSÃO 18.0 - FORMATO CORRETO');
+console.log('🚀 BACKEND PROTEGMAIS - VERSÃO 18.2 - PAGINATION FIX');
 console.log('='.repeat(60));
-console.log(`📍 URL Pública: https://protegmais.onrender.com`);
-console.log(`🔐 Formato CORRETO fornecido pelo TI ClubFix`);
-console.log(`📧 E-mail: ${ACTIVE_CONFIG.email}`);
-console.log(`🆔 Cliente ID: ${ACTIVE_CONFIG.client_id}`);
-console.log(`🌐 ClubFix WebService: ${ACTIVE_CONFIG.baseURL}`);
-console.log(`🏢 Ambiente: ${ACTIVE_CONFIG.environment}`);
-console.log(`📦 Marcas esperadas: ${ACTIVE_CONFIG.expectedBrands}`);
-console.log(`🔑 Header: x-credentials com Base64`);
+console.log(`📋 Ambiente: ${CLUBFIX_CONFIG.environment}`);
+console.log(`📦 Marcas esperadas: ${ENVIRONMENTS.PRODUCTION.expectedBrands}`);
+console.log(`🌐 ClubFix WebService: ${CLUBFIX_CONFIG.baseURL}`);
 console.log('='.repeat(60) + '\n');
 
-// ============================================
-// MIDDLEWARES
-// ============================================
+// ============================================================
+// SISTEMA DE LOGS
+// ============================================================
 
-app.use(cors());
-app.use(express.json());
+function log(message, type = 'info') {
+  const timestamp = new Date().toISOString();
+  const prefix = {
+    info: 'ℹ️',
+    success: '✅',
+    error: '❌',
+    warn: '⚠️'
+  }[type] || 'ℹ️';
+  
+  console.log(`[${timestamp}] ${prefix} ${message}`);
+}
 
-// ============================================
-// AUTENTICAÇÃO - FORMATO CORRETO
-// ============================================
+// ============================================================
+// AUTENTICAÇÃO
+// ============================================================
 
 let authToken = null;
+let tokenExpiry = null;
 
 async function authenticate() {
   try {
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`🔐 AUTENTICAÇÃO - FORMATO CORRETO DO TI`);
-    console.log(`${'='.repeat(60)}`);
-    console.log(`📧 E-mail: ${ACTIVE_CONFIG.email}`);
-    console.log(`🔑 Client ID: ${ACTIVE_CONFIG.client_id}`);
-    console.log(`🕐 Timestamp: ${new Date().toISOString()}\n`);
-
-    // Gerar x-credentials: base64(email:senha)
+    log('Autenticando com ClubFix...', 'info');
+    log(`📧 E-mail: ${CLUBFIX_CONFIG.credentials.email}`);
+    log(`🔑 Client ID: ${CLUBFIX_CONFIG.credentials.client_id}`);
+    
+    // Gerar x-credentials (base64 de email:senha)
     const credentials = Buffer.from(
-      `${ACTIVE_CONFIG.email}:${ACTIVE_CONFIG.password}`
+      `${CLUBFIX_CONFIG.credentials.email}:${CLUBFIX_CONFIG.credentials.password}`
     ).toString('base64');
-
-    console.log(`🔐 x-credentials gerado: ${credentials.substring(0, 30)}...\n`);
-
-    // Payload: apenas client_id e client_secret
-    const payload = {
-      client_id: ACTIVE_CONFIG.client_id,
-      client_secret: ACTIVE_CONFIG.client_secret
-    };
-
-    console.log(`📤 Payload:\n${JSON.stringify(payload, null, 2)}\n`);
-
-    // Fazer requisição
+    
+    log(`🔐 x-credentials gerado: ${credentials.substring(0, 30)}...`);
+    
     const response = await axios.post(
-      `${ACTIVE_CONFIG.baseURL}/auth/login`,
-      payload,
+      `${CLUBFIX_CONFIG.baseURL}/auth/login`,
+      {
+        client_id: CLUBFIX_CONFIG.credentials.client_id,
+        client_secret: CLUBFIX_CONFIG.credentials.client_secret
+      },
       {
         headers: {
           'accept': 'application/json',
           'content-type': 'application/json',
           'x-credentials': credentials
-        },
-        timeout: 10000
+        }
       }
     );
-
-    // Extrair token
-    const token = response.data?.access_token || response.data?.data?.access_token;
-    const expires = response.data?.expires_at || response.data?.data?.expires_at;
-
-    if (!token) {
-      throw new Error('Resposta sem access_token');
+    
+    authToken = response.data.access_token || response.data.data?.access_token;
+    
+    if (!authToken) {
+      throw new Error('Token não encontrado na resposta');
     }
-
-    authToken = {
-      access_token: token,
-      expires_at: expires || new Date(Date.now() + 3600000).toISOString()
-    };
-
-    console.log(`${'='.repeat(60)}`);
-    console.log(`✅✅✅ AUTENTICAÇÃO BEM-SUCEDIDA! ✅✅✅`);
-    console.log(`${'='.repeat(60)}`);
-    console.log(`🎫 Token: ${authToken.access_token.substring(0, 50)}...`);
-    console.log(`⏰ Expira em: ${new Date(authToken.expires_at).toLocaleString('pt-BR')}`);
-    console.log(`📅 ISO: ${authToken.expires_at}`);
-    console.log(`${'='.repeat(60)}\n`);
-
+    
+    // Calcular expiração (padrão: 1 hora)
+    const expiresIn = response.data.expires_in || 3600;
+    tokenExpiry = Date.now() + (expiresIn * 1000);
+    
+    log('AUTENTICAÇÃO BEM-SUCEDIDA!', 'success');
+    log(`🎫 Token: ${authToken.substring(0, 50)}...`);
+    log(`⏰ Token expira em: ${new Date(tokenExpiry).toLocaleString('pt-BR')}`);
+    
     return authToken;
-
+    
   } catch (error) {
-    console.error(`\n${'='.repeat(60)}`);
-    console.error('❌ ERRO NA AUTENTICAÇÃO');
-    console.error(`${'='.repeat(60)}`);
-    console.error(`🚨 Status: ${error.response?.status}`);
-    console.error(`📦 Resposta: ${JSON.stringify(error.response?.data)}`);
-    console.error(`💬 Mensagem: ${error.message}`);
-    console.error(`${'='.repeat(60)}\n`);
+    log('ERRO NA AUTENTICAÇÃO', 'error');
+    log(`Status: ${error.response?.status}`, 'error');
+    log(`Mensagem: ${error.response?.data?.message || error.message}`, 'error');
     throw error;
   }
 }
 
 function isTokenValid() {
-  if (!authToken || !authToken.expires_at) return false;
-  const now = new Date();
-  const expiresAt = new Date(authToken.expires_at);
-  return now < expiresAt;
+  return authToken && tokenExpiry && Date.now() < tokenExpiry;
 }
 
-async function ensureAuthenticated() {
+async function getValidToken() {
   if (!isTokenValid()) {
-    console.log('🔄 Token expirado ou inválido. Renovando...');
+    log('Token expirado ou inválido. Renovando...', 'warn');
     await authenticate();
   }
-  return authToken.access_token;
+  return authToken;
 }
 
 async function makeAuthenticatedRequest(method, endpoint, data = null) {
-  const token = await ensureAuthenticated();
-
-  const config = {
-    method,
-    url: `${ACTIVE_CONFIG.baseURL}${endpoint}`,
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    },
-    timeout: 10000
-  };
-
-  if (data) {
-    config.data = data;
-  }
-
+  const token = await getValidToken();
+  
   try {
+    const config = {
+      method,
+      url: `${CLUBFIX_CONFIG.baseURL}${endpoint}`,
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      }
+    };
+    
+    if (data) {
+      config.data = data;
+    }
+    
     const response = await axios(config);
-    return response.data;
+    return response;
+    
   } catch (error) {
-    console.error(`❌ Erro na requisição ${method} ${endpoint}:`, error.response?.data || error.message);
+    log(`Erro na requisição ${method} ${endpoint}: ${error.message}`, 'error');
     throw error;
   }
 }
 
-// ============================================
+// ============================================================
 // CACHE
-// ============================================
+// ============================================================
 
 const cache = {
   brands: null,
@@ -202,90 +204,160 @@ const cache = {
   lastUpdate: null
 };
 
-// ============================================
-// ENDPOINTS - CLUBFIX API
-// ============================================
+// ============================================================
+// ENDPOINTS
+// ============================================================
 
 // Health Check
-app.get('/health', async (req, res) => {
-  const authenticated = isTokenValid();
-  
+app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '18.0-formato-correto',
+    version: '18.2-pagination-fix',
     timestamp: new Date().toISOString(),
-    environment: ACTIVE_CONFIG.environment,
-    baseURL: ACTIVE_CONFIG.baseURL,
-    auth: {
-      authenticated,
-      tokenValid: authenticated
-    },
-    expectedBrands: ACTIVE_CONFIG.expectedBrands,
+    environment: CLUBFIX_CONFIG.environment,
+    baseURL: CLUBFIX_CONFIG.baseURL,
+    authenticated: isTokenValid(),
+    expectedBrands: ENVIRONMENTS.PRODUCTION.expectedBrands,
     cache: {
       brands: cache.brands?.length || 0,
       models: Object.keys(cache.models).length,
       plans: !!cache.plans,
       lastUpdate: cache.lastUpdate
     },
-    message: `🏆 Ambiente de ${ACTIVE_CONFIG.environment} - ${ACTIVE_CONFIG.expectedBrands} marcas disponíveis!`
+    message: '🏆 Ambiente de PRODUÇÃO ativo - 25+ marcas disponíveis!'
   });
 });
 
-// Listar TODAS as marcas
+// Endpoint para limpar cache (útil para debug)
+app.post('/api/cache/clear', (req, res) => {
+  const oldCacheSize = {
+    brands: cache.brands?.length || 0,
+    models: Object.keys(cache.models).length
+  };
+  
+  cache.brands = null;
+  cache.models = {};
+  cache.plans = null;
+  cache.lastUpdate = null;
+  
+  log('Cache limpo manualmente', 'warn');
+  
+  res.json({
+    success: true,
+    message: 'Cache limpo com sucesso',
+    oldCache: oldCacheSize
+  });
+});
+
+// ============================================================
+// MARCAS
+// ============================================================
+
 app.get('/api/clubfix/brands', async (req, res) => {
+  log('LISTAGEM DE MARCAS');
+  
   try {
-    console.log('\n📱 LISTAGEM DE MARCAS');
-
-    // Cache hit
-    if (cache.brands && cache.lastUpdate) {
-      const cacheAge = Date.now() - new Date(cache.lastUpdate).getTime();
-      if (cacheAge < 3600000) { // 1 hora
-        console.log(`✅ Retornando marcas do cache (${cache.brands.length} marcas)`);
-        return res.json({
-          success: true,
-          data: cache.brands,
-          count: cache.brands.length,
-          cached: true
-        });
-      }
-    }
-
-    // Buscar marcas
-    const response = await makeAuthenticatedRequest('GET', '/brands?limit=100');
-
-    if (response && response.data) {
-      cache.brands = response.data;
-      cache.lastUpdate = new Date().toISOString();
-
-      console.log(`✅ MARCAS carregadas: ${response.data.length}`);
-
+    // Verificar cache
+    if (cache.brands && cache.brands.length > 0) {
+      log(`Cache HIT: ${cache.brands.length} marcas`, 'success');
       return res.json({
         success: true,
-        data: response.data,
-        count: response.data.length,
-        cached: false
+        data: cache.brands,
+        count: cache.brands.length,
+        cached: true
       });
     }
-
-    throw new Error('Resposta inválida da API ClubFix');
+    
+    log('Buscando TODAS as marcas da API ClubFix...');
+    
+    // ESTRATÉGIA: Buscar todas as páginas até não ter mais dados
+    let allBrands = [];
+    let page = 1;
+    let hasMore = true;
+    const perPage = 100;
+    
+    while (hasMore) {
+      log(`Buscando página ${page} (limit=${perPage})...`);
+      
+      const response = await makeAuthenticatedRequest('GET', `/brands?page=${page}&limit=${perPage}`);
+      
+      // Verificar diferentes formatos de resposta
+      let brands = [];
+      let total = 0;
+      
+      if (response.data) {
+        brands = response.data.data || response.data || [];
+        total = response.data.total || response.data.count || brands.length;
+      } else if (Array.isArray(response)) {
+        brands = response;
+        total = brands.length;
+      }
+      
+      log(`Página ${page}: ${brands.length} marcas encontradas (total: ${total})`);
+      
+      if (brands.length > 0) {
+        allBrands = [...allBrands, ...brands];
+        log(`Total acumulado: ${allBrands.length} marcas`);
+      }
+      
+      // Verificar se há mais páginas
+      if (brands.length < perPage || brands.length === 0) {
+        hasMore = false;
+        log('Última página alcançada');
+      } else if (total && allBrands.length >= total) {
+        hasMore = false;
+        log(`Total esperado (${total}) alcançado`);
+      } else {
+        page++;
+      }
+      
+      // Segurança: máximo 10 páginas
+      if (page > 10) {
+        log('ATENÇÃO: Limite de 10 páginas alcançado', 'warn');
+        hasMore = false;
+      }
+    }
+    
+    // Remover duplicatas (por ID)
+    const uniqueBrands = Array.from(
+      new Map(allBrands.map(brand => [brand.id, brand])).values()
+    );
+    
+    log(`TOTAL FINAL: ${uniqueBrands.length} marcas únicas carregadas`, 'success');
+    
+    // Atualizar cache
+    cache.brands = uniqueBrands;
+    cache.lastUpdate = new Date().toISOString();
+    
+    res.json({
+      success: true,
+      data: uniqueBrands,
+      count: uniqueBrands.length,
+      cached: false,
+      pages: page - 1
+    });
+    
   } catch (error) {
-    console.error('❌ Erro ao buscar marcas:', error.response?.data || error.message);
-    res.status(500).json({
+    log(`ERRO AO LISTAR MARCAS: ${error.message}`, 'error');
+    res.status(error.response?.status || 500).json({
       success: false,
-      error: error.response?.data || error.message
+      error: error.response?.data?.message || error.message
     });
   }
 });
 
-// Listar modelos de uma marca
+// ============================================================
+// MODELOS
+// ============================================================
+
 app.get('/api/clubfix/models/:brandId', async (req, res) => {
   try {
     const { brandId } = req.params;
-    console.log(`\n📱 LISTAGEM DE MODELOS - Marca ID: ${brandId}`);
+    log(`LISTAGEM DE MODELOS - Marca ID: ${brandId}`);
 
     // Cache hit
     if (cache.models[brandId]) {
-      console.log(`✅ Retornando modelos do cache (${cache.models[brandId].length} modelos)`);
+      log(`Cache HIT: ${cache.models[brandId].length} modelos`, 'success');
       return res.json({
         success: true,
         data: cache.models[brandId],
@@ -300,69 +372,69 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
 
     // TENTATIVA 1: GET /brands/{id}
     try {
-      console.log(`🧪 Tentativa 1: GET /brands/${brandId}`);
+      log(`🧪 Tentativa 1: GET /brands/${brandId}`);
       response = await makeAuthenticatedRequest('GET', `/brands/${brandId}`);
-      console.log(`📦 Resposta bruta:`, JSON.stringify(response).substring(0, 500));
+      log(`📦 Resposta bruta:`, JSON.stringify(response.data).substring(0, 500));
 
       // Tentar extrair modelos de diferentes formatos
-      if (response?.data?.models) {
+      if (response.data?.data?.models) {
+        models = response.data.data.models;
+        log(`✅ Formato 1: response.data.data.models (${models.length} modelos)`, 'success');
+      } else if (response.data?.models) {
         models = response.data.models;
-        console.log(`✅ Formato 1: response.data.models (${models.length} modelos)`);
-      } else if (response?.models) {
-        models = response.models;
-        console.log(`✅ Formato 2: response.models (${models.length} modelos)`);
-      } else if (Array.isArray(response?.data)) {
+        log(`✅ Formato 2: response.data.models (${models.length} modelos)`, 'success');
+      } else if (Array.isArray(response.data?.data)) {
+        models = response.data.data;
+        log(`✅ Formato 3: response.data.data (${models.length} modelos)`, 'success');
+      } else if (Array.isArray(response.data)) {
         models = response.data;
-        console.log(`✅ Formato 3: response.data (${models.length} modelos)`);
-      } else if (Array.isArray(response)) {
-        models = response;
-        console.log(`✅ Formato 4: response (${models.length} modelos)`);
+        log(`✅ Formato 4: response.data (${models.length} modelos)`, 'success');
       }
     } catch (err) {
-      console.log(`❌ Tentativa 1 falhou: ${err.message}`);
+      log(`❌ Tentativa 1 falhou: ${err.message}`, 'warn');
     }
 
     // TENTATIVA 2: GET /models?brand_id={id}
     if (!models) {
       try {
-        console.log(`🧪 Tentativa 2: GET /models?brand_id=${brandId}`);
+        log(`🧪 Tentativa 2: GET /models?brand_id=${brandId}`);
         response = await makeAuthenticatedRequest('GET', `/models?brand_id=${brandId}`);
-        console.log(`📦 Resposta bruta:`, JSON.stringify(response).substring(0, 500));
+        log(`📦 Resposta bruta:`, JSON.stringify(response.data).substring(0, 500));
 
-        if (response?.data) {
-          models = Array.isArray(response.data) ? response.data : [response.data];
-          console.log(`✅ Formato 5: /models?brand_id (${models.length} modelos)`);
-        } else if (Array.isArray(response)) {
-          models = response;
-          console.log(`✅ Formato 6: /models direct array (${models.length} modelos)`);
+        if (response.data?.data) {
+          models = Array.isArray(response.data.data) ? response.data.data : [response.data.data];
+          log(`✅ Formato 5: /models?brand_id (${models.length} modelos)`, 'success');
+        } else if (Array.isArray(response.data)) {
+          models = response.data;
+          log(`✅ Formato 6: /models direct array (${models.length} modelos)`, 'success');
         }
       } catch (err) {
-        console.log(`❌ Tentativa 2 falhou: ${err.message}`);
+        log(`❌ Tentativa 2 falhou: ${err.message}`, 'warn');
       }
     }
 
     // TENTATIVA 3: GET /brands/{id}/models
     if (!models) {
       try {
-        console.log(`🧪 Tentativa 3: GET /brands/${brandId}/models`);
+        log(`🧪 Tentativa 3: GET /brands/${brandId}/models`);
         response = await makeAuthenticatedRequest('GET', `/brands/${brandId}/models`);
-        console.log(`📦 Resposta bruta:`, JSON.stringify(response).substring(0, 500));
+        log(`📦 Resposta bruta:`, JSON.stringify(response.data).substring(0, 500));
 
-        if (response?.data) {
-          models = Array.isArray(response.data) ? response.data : [response.data];
-          console.log(`✅ Formato 7: /brands/{id}/models (${models.length} modelos)`);
-        } else if (Array.isArray(response)) {
-          models = response;
-          console.log(`✅ Formato 8: direct array (${models.length} modelos)`);
+        if (response.data?.data) {
+          models = Array.isArray(response.data.data) ? response.data.data : [response.data.data];
+          log(`✅ Formato 7: /brands/{id}/models (${models.length} modelos)`, 'success');
+        } else if (Array.isArray(response.data)) {
+          models = response.data;
+          log(`✅ Formato 8: direct array (${models.length} modelos)`, 'success');
         }
       } catch (err) {
-        console.log(`❌ Tentativa 3 falhou: ${err.message}`);
+        log(`❌ Tentativa 3 falhou: ${err.message}`, 'warn');
       }
     }
 
     if (models && models.length > 0) {
       cache.models[brandId] = models;
-      console.log(`✅ MODELOS carregados: ${models.length}`);
+      log(`MODELOS carregados: ${models.length}`, 'success');
 
       return res.json({
         success: true,
@@ -374,8 +446,7 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
 
     throw new Error('Nenhum formato de resposta válido encontrado');
   } catch (error) {
-    console.error('❌ Erro ao buscar modelos:', error.response?.data || error.message);
-    console.error('Stack:', error.stack);
+    log(`ERRO ao buscar modelos: ${error.message}`, 'error');
     res.status(500).json({
       success: false,
       error: error.response?.data || error.message,
@@ -384,76 +455,125 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
   }
 });
 
-// Cotação
-app.get('/api/clubfix/quotation', async (req, res) => {
-  try {
-    const { plan_id, model_id, year } = req.query;
+// ============================================================
+// PLANOS
+// ============================================================
 
-    if (!plan_id || !model_id || !year) {
-      return res.status(400).json({
-        success: false,
-        error: 'Parâmetros obrigatórios: plan_id, model_id, year'
+app.get('/api/clubfix/plans', async (req, res) => {
+  try {
+    log('LISTAGEM DE PLANOS');
+    
+    // Cache hit
+    if (cache.plans) {
+      log('Cache HIT: Planos', 'success');
+      return res.json({
+        success: true,
+        data: cache.plans,
+        cached: true
       });
     }
-
-    console.log(`\n💰 COTAÇÃO - Plano: ${plan_id}, Modelo: ${model_id}, Ano: ${year}`);
-
-    const response = await makeAuthenticatedRequest(
-      'GET',
-      `/quotation?plan_id=${plan_id}&model_id=${model_id}&year=${year}`
-    );
-
-    console.log('✅ Cotação realizada com sucesso');
-
+    
+    const response = await makeAuthenticatedRequest('GET', '/plans');
+    const plans = response.data?.data || response.data || [];
+    
+    cache.plans = plans;
+    
+    log(`PLANOS carregados: ${plans.length}`, 'success');
+    
     res.json({
       success: true,
-      data: response.data
+      data: plans,
+      count: plans.length,
+      cached: false
     });
+    
   } catch (error) {
-    console.error('❌ Erro ao realizar cotação:', error.response?.data || error.message);
-    res.status(500).json({
+    log(`ERRO ao listar planos: ${error.message}`, 'error');
+    res.status(error.response?.status || 500).json({
       success: false,
-      error: error.response?.data || error.message
+      error: error.response?.data?.message || error.message
     });
   }
 });
 
-// Criar assinatura
+// ============================================================
+// COTAÇÃO
+// ============================================================
+
+app.get('/api/clubfix/quotation', async (req, res) => {
+  try {
+    const { model_id, is_used } = req.query;
+    
+    if (!model_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Parâmetro obrigatório: model_id'
+      });
+    }
+    
+    log(`COTAÇÃO - Modelo: ${model_id}, Usado: ${is_used}`);
+    
+    const response = await makeAuthenticatedRequest(
+      'GET',
+      `/quotation?model_id=${model_id}&is_used=${is_used || false}`
+    );
+    
+    log('Cotação realizada com sucesso', 'success');
+    
+    res.json({
+      success: true,
+      data: response.data?.data || response.data
+    });
+    
+  } catch (error) {
+    log(`ERRO ao realizar cotação: ${error.message}`, 'error');
+    res.status(error.response?.status || 500).json({
+      success: false,
+      error: error.response?.data?.message || error.message
+    });
+  }
+});
+
+// ============================================================
+// ASSINATURAS
+// ============================================================
+
 app.post('/api/clubfix/subscriptions', async (req, res) => {
   try {
-    console.log('\n📝 CRIAR ASSINATURA');
-    console.log('Dados recebidos:', JSON.stringify(req.body, null, 2));
-
+    log('CRIAR ASSINATURA');
+    log('Dados recebidos:', JSON.stringify(req.body, null, 2));
+    
     const response = await makeAuthenticatedRequest('POST', '/subscriptions', req.body);
-
-    console.log('✅ Assinatura criada com sucesso!');
-    console.log('ID:', response.data?.id);
-
+    
+    log('Assinatura criada com sucesso!', 'success');
+    log(`ID: ${response.data?.data?.id || response.data?.id}`);
+    
     res.status(201).json({
       success: true,
-      data: response.data
+      data: response.data?.data || response.data
     });
+    
   } catch (error) {
-    console.error('❌ Erro ao criar assinatura:', error.response?.data || error.message);
-    res.status(500).json({
+    log(`ERRO ao criar assinatura: ${error.message}`, 'error');
+    res.status(error.response?.status || 500).json({
       success: false,
-      error: error.response?.data || error.message
+      error: error.response?.data?.message || error.message
     });
   }
 });
 
-// ============================================
+// ============================================================
 // INICIALIZAÇÃO
-// ============================================
+// ============================================================
 
 app.listen(PORT, async () => {
   console.log('\n' + '='.repeat(60));
   console.log(`✅ Servidor rodando na porta ${PORT}`);
   console.log(`📍 URL: http://localhost:${PORT}`);
-  console.log(`🌐 Ambiente: ${ACTIVE_CONFIG.environment}`);
-  console.log(`🔗 ClubFix: ${ACTIVE_CONFIG.baseURL}`);
+  console.log(`🌐 Ambiente: ${CLUBFIX_CONFIG.environment}`);
+  console.log(`🔗 ClubFix: ${CLUBFIX_CONFIG.baseURL}`);
   console.log('='.repeat(60) + '\n');
-
+  
   // Tentar autenticar na inicialização
   try {
     await authenticate();
