@@ -151,7 +151,6 @@ class ClubFixServiceV2 {
      */
     async ensureAuthenticated() {
         if (!this.token.accessToken || Date.now() >= this.token.expiresAt) {
-            console.log('🔄 Token expirado, renovando...');
             await this.authenticate();
         }
     }
@@ -557,7 +556,7 @@ class ClubFixServiceV2 {
             
             return {
                 id: subscription.id,
-                customerId: subscription.customer_id
+                customerId: subscription.customer_id,
                 planId: subscription.plan_id,
                 modelId: subscription.model_id,
                 status: subscription.status,
@@ -572,9 +571,23 @@ class ClubFixServiceV2 {
             throw error;
         }
     }
+    
+    /**
+     * 🗑️ LIMPAR CACHE
+     */
+    clearCache() {
+        console.log('🗑️ Limpando cache...');
+        this.cache = {
+            brands: null,
+            models: {},
+            plans: {},
+            lastUpdate: null
+        };
+        console.log('✅ Cache limpo');
+    }
 }
 
-// Criar instância única (Singleton)
+// Singleton
 const clubfixService = new ClubFixServiceV2();
 
 module.exports = clubfixService;
