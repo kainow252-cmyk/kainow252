@@ -67,68 +67,68 @@ class ClubFixServiceV2 {
      * Response: { access_token, token_type, expires_in }
      */
     async authenticate() {
+        const email = process.env.CLUBFIX_EMAIL || 'kainow@clubfix.com.br';
+        const password = process.env.CLUBFIX_PASSWORD || 'Kainow@27923746';
+
         if (!this.clientId || !this.clientSecret) {
             throw new Error('CLIENT_ID e CLIENT_SECRET são obrigatórios');
         }
 
-        console.log('\n🔐 Autenticando na API ClubFix...');
-        console.log(`Client ID: ${this.clientId}`);
-
-        // Endpoints possíveis para testar
-        const authEndpoints = [
-            '/oauth/token',
-            '/auth/token',
-            '/api/auth',
-            '/api/oauth/token',
-            '/token',
-            '/api-reference/auth',
-            '/auth/oauth/token',
-            '/v1/oauth/token'
-        ];
-
-        // Testar cada endpoint
-        for (const endpoint of authEndpoints) {
-            try {
-                console.log(`\n🔍 Tentando: POST ${endpoint}`);
-                
-                const response = await this.client.post(endpoint, {
-                    client_id: this.clientId,
-                    client_secret: this.clientSecret,
-                    grant_type: 'client_credentials'
-                });
-
-                if (response.data && response.data.access_token) {
-                    this.token.accessToken = response.data.access_token;
-                    
-                    // Calcular expiração (padrão: 1 hora - 5 min de margem)
-                    const expiresIn = response.data.expires_in || 3600;
-                    this.token.expiresAt = Date.now() + ((expiresIn - 300) * 1000);
-                    
-                    // Configurar token no header
-                    this.client.defaults.headers['Authorization'] = `Bearer ${this.token.accessToken}`;
-                    
-                    console.log(`\n✅ SUCESSO! Endpoint correto: ${endpoint}`);
-                    console.log(`Token expira em: ${expiresIn}s`);
-                    
-                    return true;
-                }
-
-            } catch (error) {
-                const status = error.response?.status;
-                console.log(`   ❌ Falhou: Status ${status || 'N/A'}`);
-                
-                // Se não for 404 ou 405, pode ser problema de credenciais
-                if (status && status !== 404 && status !== 405) {
-                    console.error(`\n❌ Erro ${status} em ${endpoint}:`);
-                    console.error(`Dados:`, JSON.stringify(error.response?.data, null, 2));
-                }
-            }
+        if (!email || !password) {
+            throw new Error('EMAIL e PASSWORD são obrigatórios');
         }
 
-        // Nenhum endpoint funcionou
-        console.error('\n❌ NENHUM ENDPOINT DE AUTENTICAÇÃO FUNCIONOU!');
-        console.error('Endpoints testados:', authEndpoints);
-        throw new Error('Falha na autenticação com ClubFix API - endpoint não encontrado');
+        console.log('\n🔐 Autenticando na API ClubFix (Docs Oficiais)...');
+        console.log(`Email: ${email}`);
+        console.log(`Client ID: ${this.clientId}`);
+
+        try {
+            // Criar X-CREDENTIALS header (base64 de email:password)
+            const credentials = Buffer.from(`${email}:${password}`).toString('base64');
+            
+            console.log('📝 Usando endpoint da documentação: POST /auth/login');
+            console.log(`X-CREDENTIALS: ${credentials.substring(0, 20)}...`);
+
+            // Endpoint conforme documentação oficial
+            const response = await this.client.post('/auth/login', {
+                client_id: this.clientId,
+                client_secret: this.clientSecret
+            }, {
+                headers: {
+                    'X-CREDENTIALS': credentials
+                }
+            });
+
+            if (response.data && response.data.access_token) {
+                this.token.accessToken = response.data.access_token;
+                
+                // A resposta tem expires_in como string de data
+                // Calcular expiração (padrão: 1 hora - 5 min de margem)
+                const expiresIn = 3600; // 1 hora
+                this.token.expiresAt = Date.now() + ((expiresIn - 300) * 1000);
+                
+                // Configurar token no header
+                this.client.defaults.headers['Authorization'] = `Bearer ${this.token.accessToken}`;
+                
+                console.log('✅ Autenticação bem-sucedida!');
+                console.log(`Token: ${this.token.accessToken.substring(0, 20)}...`);
+                console.log(`Token expira em: ${response.data.expires_in || '1 hora'}`);
+                
+                return true;
+            }
+
+            throw new Error('Resposta de autenticação inválida');
+
+        } catch (error) {
+            console.error('❌ Erro na autenticação:');
+            console.error(`Status: ${error.response?.status}`);
+            console.error(`Status Text: ${error.response?.statusText}`);
+            console.error(`URL: ${this.baseURL}/auth/login`);
+            console.error(`Dados da resposta:`, JSON.stringify(error.response?.data, null, 2));
+            console.error(`Mensagem: ${error.response?.data?.message || error.message}`);
+            
+            throw new Error('Falha na autenticação com ClubFix API');
+        }
     }
 
     /**
