@@ -334,9 +334,15 @@ class ClubFixServiceV2 {
         
         // Endpoints possíveis para cotação
         const quotationEndpoints = [
-            '/subscriptions/quotation',
+            `/models/${modelId}/quotation`,          // Com model_id na URL
+            `/models/${modelId}/price`,
+            `/models/${modelId}/pricing`,
+            `/devices/models/${modelId}/quotation`,
+            '/subscriptions/quotation',               // Com query params
             '/quotation',
             '/quotations',
+            '/price',
+            '/pricing',
             '/api/subscriptions/quotation',
             '/api-reference/subscriptions/quotation'
         ];
@@ -344,22 +350,40 @@ class ClubFixServiceV2 {
         // Testar cada endpoint
         for (const endpoint of quotationEndpoints) {
             try {
-                console.log(`   🔍 Tentando: GET ${endpoint}?model_id=${modelId}&is_used=${isUsed}`);
+                // Se o endpoint tem {modelId} na URL, não precisa de query params
+                const hasModelIdInUrl = endpoint.includes(`/${modelId}/`);
                 
-                const response = await this.client.get(endpoint, {
-                    params: {
-                        model_id: modelId,
-                        is_used: isUsed
-                    }
-                });
-
-                const quotation = response.data?.data || response.data;
-                
-                if (quotation) {
-                    console.log(`   ✅ SUCESSO! Endpoint correto: ${endpoint}`);
-                    console.log('✅ Cotação obtida com sucesso');
+                if (hasModelIdInUrl) {
+                    console.log(`   🔍 Tentando: GET ${endpoint}?is_used=${isUsed}`);
                     
-                    return quotation;
+                    const response = await this.client.get(endpoint, {
+                        params: { is_used: isUsed }
+                    });
+                    
+                    const quotation = response.data?.data || response.data;
+                    
+                    if (quotation) {
+                        console.log(`   ✅ SUCESSO! Endpoint correto: ${endpoint}`);
+                        console.log('✅ Cotação obtida com sucesso');
+                        return quotation;
+                    }
+                } else {
+                    console.log(`   🔍 Tentando: GET ${endpoint}?model_id=${modelId}&is_used=${isUsed}`);
+                    
+                    const response = await this.client.get(endpoint, {
+                        params: {
+                            model_id: modelId,
+                            is_used: isUsed
+                        }
+                    });
+                    
+                    const quotation = response.data?.data || response.data;
+                    
+                    if (quotation) {
+                        console.log(`   ✅ SUCESSO! Endpoint correto: ${endpoint}`);
+                        console.log('✅ Cotação obtida com sucesso');
+                        return quotation;
+                    }
                 }
                 
             } catch (error) {
