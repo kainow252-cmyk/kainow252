@@ -384,11 +384,42 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
     }
     
     log(`🔍 Cache MISS: Buscando modelos da marca ${brandId} na API...`);
+    log(`🌐 URL completa: ${CLUBFIX_CONFIG.baseURL}/brands/${brandId}`);
+    
     const response = await makeAuthenticatedRequest('GET', `/brands/${brandId}`);
     
-    // A resposta da API ClubFix retorna a marca com seus modelos
-    const brandData = response.data.data;
-    const models = brandData.models || [];
+    log(`📡 Resposta recebida da API ClubFix`);
+    log(`📊 Status: ${response.status}`);
+    log(`📦 Estrutura da resposta: ${JSON.stringify(Object.keys(response.data))}`);
+    
+    // Testar múltiplos formatos de resposta
+    let models = [];
+    
+    // Formato 1: response.data.data.models
+    if (response.data?.data?.models) {
+      models = response.data.data.models;
+      log(`✅ Formato 1: response.data.data.models (${models.length} modelos)`);
+    }
+    // Formato 2: response.data.models
+    else if (response.data?.models) {
+      models = response.data.models;
+      log(`✅ Formato 2: response.data.models (${models.length} modelos)`);
+    }
+    // Formato 3: response.data (array direto)
+    else if (Array.isArray(response.data)) {
+      models = response.data;
+      log(`✅ Formato 3: response.data (array direto, ${models.length} modelos)`);
+    }
+    // Formato 4: response.data.data (array direto)
+    else if (Array.isArray(response.data?.data)) {
+      models = response.data.data;
+      log(`✅ Formato 4: response.data.data (array direto, ${models.length} modelos)`);
+    }
+    // Não encontrou
+    else {
+      log(`❌ NENHUM FORMATO RECONHECIDO!`, 'error');
+      log(`📦 response.data completo: ${JSON.stringify(response.data).substring(0, 500)}`, 'error');
+    }
     
     log(`📱 API retornou ${models.length} modelos para marca ${brandId}`);
     if (models.length > 0) {
@@ -409,9 +440,16 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
     
   } catch (error) {
     log(`❌ ERRO AO LISTAR MODELOS DA MARCA ${brandId}: ${error.message}`, 'error');
+    log(`❌ Status da API: ${error.response?.status || 'N/A'}`, 'error');
+    log(`❌ Mensagem da API: ${error.response?.data?.message || 'N/A'}`, 'error');
+    log(`❌ URL tentada: ${CLUBFIX_CONFIG.baseURL}/brands/${brandId}`, 'error');
+    log(`❌ Dados completos do erro: ${JSON.stringify(error.response?.data || {})}`,'error');
+    
     res.status(error.response?.status || 500).json({
       success: false,
-      error: error.response?.data?.message || error.message
+      error: error.response?.data?.message || error.message,
+      brandId: brandId,
+      url: `${CLUBFIX_CONFIG.baseURL}/brands/${brandId}`
     });
   }
 });
@@ -538,7 +576,7 @@ app.post('/api/cache/clear', (req, res) => {
 
 app.listen(PORT, async () => {
   console.log('='.repeat(60));
-  console.log('==> 🏆 BACKEND PROTEGMAIS - VERSÃO 18.3 - CACHE FIX');
+  console.log('==> 🏆 BACKEND PROTEGMAIS - VERSÃO 18.3.2 - MULTI-FORMAT FIX');
   console.log('='.repeat(60));
   console.log(`==> Porta: ${PORT}`);
   console.log(`==> URL Pública: https://protegmais.onrender.com`);
