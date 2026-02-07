@@ -2,12 +2,17 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
+# Copiar package.json do backend-proxy
+COPY backend-proxy/package*.json ./
 
+# Instalar dependências
 RUN npm install
 
-COPY . .
+# Copiar código do backend-proxy
+COPY backend-proxy/ ./
 
-EXPOSE 10000
+# Expor porta
+EXPOSE 3001
 
-CMD ["npm", "start"]
+# Comando de início
+CMD ["node", "servidor.js"]
