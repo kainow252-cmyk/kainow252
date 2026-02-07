@@ -165,33 +165,46 @@ class ClubFixServiceV2 {
             return this.cache.brands;
         }
 
-        try {
-            console.log('🔍 Buscando marcas...');
-            
-            const response = await this.client.get('/api-reference/devices/brands', {
-                params: {
-                    page: 1,
-                    per_page: 100
-                }
-            });
+        console.log('🔍 Buscando marcas...');
+        
+        // Endpoints possíveis para marcas
+        const brandsEndpoints = [
+            '/devices/brands',
+            '/brands',
+            '/api/devices/brands',
+            '/api-reference/devices/brands'
+        ];
 
-            const brands = response.data?.data || response.data || [];
-            
-            // Atualizar cache
-            this.cache.brands = brands;
-            this.cache.lastUpdate = new Date().toISOString();
-            
-            console.log(`✅ ${brands.length} marcas encontradas`);
-            
-            return brands;
+        // Testar cada endpoint
+        for (const endpoint of brandsEndpoints) {
+            try {
+                console.log(`   Tentando: GET ${endpoint}`);
+                
+                const response = await this.client.get(endpoint, {
+                    params: {
+                        page: 1,
+                        per_page: 100
+                    }
+                });
 
-        } catch (error) {
-            console.error('❌ Erro ao buscar marcas:');
-            console.error(`Status: ${error.response?.status}`);
-            console.error(`Erro: ${error.response?.data?.message || error.message}`);
-            
-            throw new Error('Falha ao buscar marcas');
+                const brands = response.data?.data || response.data || [];
+                
+                // Atualizar cache
+                this.cache.brands = brands;
+                this.cache.lastUpdate = new Date().toISOString();
+                
+                console.log(`✅ ${brands.length} marcas encontradas (endpoint: ${endpoint})`);
+                
+                return brands;
+
+            } catch (error) {
+                const status = error.response?.status;
+                console.log(`      ❌ Status ${status || 'N/A'}`);
+            }
         }
+
+        // Nenhum endpoint funcionou
+        throw new Error('Falha ao buscar marcas - nenhum endpoint funcionou');
     }
 
     /**
