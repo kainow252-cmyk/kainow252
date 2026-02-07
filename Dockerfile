@@ -15,4 +15,4 @@ COPY backend-proxy/ ./
 EXPOSE 3001
 
 # Comando de início
-CMD ["node", "servidor.js"]
+CMD ["node", "server.js"]
