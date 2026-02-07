@@ -9,7 +9,7 @@ app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.get('/health', (req, res) => {
+app.get('/health', function(req, res) {
   res.json({ 
     status: 'OK', 
     service: 'ProtegMais Backend v2.0',
@@ -17,6 +17,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, function() {
   console.log('Servidor rodando na porta ' + PORT);
 });
