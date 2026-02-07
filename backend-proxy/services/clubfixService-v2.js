@@ -282,12 +282,12 @@ class ClubFixServiceV2 {
             }
 
             console.log(`💰 Buscando cotação para modelo ${modelId}...`);
-
+            
             const endpoints = [
+                `/quotation`,
                 `/subscriptions/quotation`,
                 `/api-reference/subscriptions/quotation`
             ];
-
             for (const endpoint of endpoints) {
                 try {
                     const response = await this.client.get(endpoint, {
