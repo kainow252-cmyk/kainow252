@@ -44,25 +44,33 @@ class ClubFixServiceV2 {
             },
             timeout: 30000
         });
+        
+        console.log('📱 ClubFix Service v2.0 inicializado');
+        console.log('   Base URL:', this.baseURL);
+    }
+    
+    /**
+     * 📊 INFORMAÇÕES DO SERVIÇO
+     */
+    getInfo() {
+        return {
+            baseURL: this.baseURL,
+            authenticated: !!this.token.accessToken,
+            tokenExpires: this.token.expiresAt ? new Date(this.token.expiresAt).toISOString() : null,
+            cacheStatus: {
+                brands: !!this.cache.brands,
+                modelsCount: Object.keys(this.cache.models).length,
+                plansCount: Object.keys(this.cache.plans).length
+            }
+        };
     }
     
     /**
      * 🔐 AUTENTICAÇÃO OAUTH 2.0
      */
-    getInfo() {
-    return {
-        baseURL: this.baseURL,
-        authenticated: !!this.token.accessToken,
-        tokenExpires: this.token.expiresAt ? new Date(this.token.expiresAt).toISOString() : null,
-        cacheStatus: {
-            brands: !!this.cache.brands,
-            modelsCount: Object.keys(this.cache.models).length,
-            plansCount: Object.keys(this.cache.plans).length
-        }
-    };
-}
     async authenticate() {
-        try {            console.log('🔐 Autenticando na API ClubFix...');
+        try {
+            console.log('🔐 Autenticando na API ClubFix...');
             
             const response = await this.client.post('/api-reference/auth', {
                 client_id: this.clientId,
@@ -83,11 +91,15 @@ class ClubFixServiceV2 {
             this.client.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
             
             console.log('✅ Autenticação bem-sucedida');
-            console.log(`   Token expira em: ${expires_in}s`);
+            console.log(`🎫 Token obtido (expira em ${expires_in}s)`);
             
             return true;
         } catch (error) {
             console.error('❌ Erro na autenticação:', error.message);
+            if (error.response) {
+                console.error('   Status:', error.response.status);
+                console.error('   Dados:', error.response.data);
+            }
             throw new Error('Falha na autenticação com ClubFix API');
         }
     }
@@ -97,6 +109,7 @@ class ClubFixServiceV2 {
      */
     async ensureAuthenticated() {
         if (!this.token.accessToken || Date.now() >= this.token.expiresAt) {
+            console.log('🔄 Token expirado, renovando...');
             await this.authenticate();
         }
     }
@@ -401,72 +414,100 @@ class ClubFixServiceV2 {
     /**
      * 💳 PROCESSAR PAGAMENTO PIX
      */
-    async processPixPayment(subscriptionId) {
+    async processPaymentPix(subscriptionId) {
         await this.ensureAuthenticated();
         
         try {
-            console.log('💳 Processando pagamento PIX...');
+            console.log('💳 Gerando pagamento Pix...');
+            console.log('   Assinatura:', subscriptionId);
             
-            const response = await this.client.post('/api-reference/payments/pix', {
-                subscription_id: subscriptionId
+            const response = await this.client.post('/api-reference/subscriptions/payment', {
+                subscription_id: subscriptionId,
+                payment_method: 'pix'
             });
             
-            console.log('✅ QR Code PIX gerado');
-            return response.data.data;
+            const payment = response.data.data;
+            
+            console.log('✅ QR Code Pix gerado com sucesso');
+            console.log('   Expira em:', payment.expires_at);
+            
+            return {
+                subscriptionId: payment.subscription_id,
+                paymentMethod: payment.payment_method,
+                qrCode: payment.qr_code,
+                qrCodeImage: payment.qr_code_image,
+                expiresAt: payment.expires_at,
+                status: payment.status
+            };
             
         } catch (error) {
-            console.error('❌ Erro ao processar pagamento PIX:', error.message);
+            console.error('❌ Erro ao gerar pagamento Pix:', error.message);
             throw error;
         }
     }
     
     /**
-     * 💳 PROCESSAR PAGAMENTO CARTÃO
+     * 💳 PROCESSAR PAGAMENTO CARTÃO DE CRÉDITO
      */
-    async processCreditCardPayment(paymentData) {
+    async processPaymentCreditCard(subscriptionId, cardData) {
         await this.ensureAuthenticated();
         
         try {
             console.log('💳 Processando pagamento com cartão...');
+            console.log('   Assinatura:', subscriptionId);
             
-            const response = await this.client.post('/api-reference/payments/credit-card', {
-                subscription_id: paymentData.subscription_id,
-                card_number: paymentData.card_number,
-                card_holder: paymentData.card_holder,
-                card_expiration: paymentData.card_expiration,
-                card_cvv: paymentData.card_cvv,
-                installments: paymentData.installments || 1
+            const response = await this.client.post('/api-reference/subscriptions/payment', {
+                subscription_id: subscriptionId,
+                payment_method: 'credit_card',
+                card_number: cardData.number,
+                card_holder: cardData.holder,
+                card_expiration: cardData.expiration,
+                card_cvv: cardData.cvv,
+                installments: cardData.installments || 1
             });
             
-            console.log('✅ Pagamento processado');
-            return response.data.data;
+            const payment = response.data.data;
+            
+            console.log('✅ Pagamento processado com sucesso');
+            console.log('   Status:', payment.status);
+            
+            return {
+                subscriptionId: payment.subscription_id,
+                paymentMethod: payment.payment_method,
+                status: payment.status,
+                transactionId: payment.transaction_id
+            };
             
         } catch (error) {
-            console.error('❌ Erro ao processar pagamento:', error.message);
+            console.error('❌ Erro ao processar pagamento com cartão:', error.message);
             throw error;
         }
     }
     
     /**
-     * 📊 OBTER STATUS DA ASSINATURA
+     * 📊 OBTER ASSINATURA
      */
-    async getSubscriptionStatus(subscriptionId) {
+    async getSubscription(subscriptionId) {
         await this.ensureAuthenticated();
         
         try {
-            console.log(`📊 Buscando status da assinatura ${subscriptionId}...`);
+            console.log(`📊 Buscando assinatura ${subscriptionId}...`);
             
-            const response = await this.client.get(`/api-reference/subscriptions/show`, {
+            const response = await this.client.get('/api-reference/subscriptions/show', {
                 params: { id: subscriptionId }
             });
             
+            console.log('✅ Assinatura encontrada');
             return response.data.data;
             
         } catch (error) {
-            console.error('❌ Erro ao buscar status:', error.message);
+            console.error('❌ Erro ao buscar assinatura:', error.message);
             throw error;
         }
     }
 }
 
-module.exports = ClubFixServiceV2;
+// Criar instância única (Singleton)
+const clubfixService = new ClubFixServiceV2();
+
+module.exports = clubfixService;
