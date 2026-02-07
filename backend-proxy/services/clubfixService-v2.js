@@ -1,295 +1,432 @@
-require('dotenv').config();
+/**
+ * ClubFix Service v5.0 - Baseado na Documentação Oficial do TI
+ * 
+ * Documentação Oficial:
+ * - Auth: https://docs.clubfix.com.br/api-reference/auth
+ * - Marcas: https://docs.clubfix.com.br/api-reference/devices/brands
+ * - Modelos: https://docs.clubfix.com.br/api-reference/devices/models
+ */
+
 const axios = require('axios');
 
-class ClubFixService {
-  constructor() {
-    this.baseURL = process.env.CLUBFIX_BASE_URL || 'https://clubfix.com.br/webservice';
-    this.clientId = process.env.CLUBFIX_CLIENT_ID;
-    this.clientSecret = process.env.CLUBFIX_CLIENT_SECRET;
-    this.accessToken = null;
-    this.tokenExpiresAt = null;
-    this.cache = {
-      brands: null,
-      models: {},
-      quotations: {}
-    };
-    this.cacheExpiry = 60 * 60 * 1000; // 1 hora
-  }
-
-  // ============================================
-  // AUTENTICAÇÃO OAuth 2.0
-  // ============================================
-
-  async authenticate() {
-    try {
-      console.log('[AUTH] Autenticando com ClubFix OAuth 2.0...');
-      
-      const response = await axios.post(`${this.baseURL}/oauth/token`, {
-        grant_type: 'client_credentials',
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-        scope: '*'
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      });
-
-      this.accessToken = response.data.access_token;
-      const expiresIn = response.data.expires_in || 3600;
-      this.tokenExpiresAt = Date.now() + (expiresIn * 1000);
-
-      console.log('[AUTH] ✅ Autenticado com sucesso!');
-      console.log(`[AUTH] Token expira em: ${new Date(this.tokenExpiresAt).toISOString()}`);
-      
-      return this.accessToken;
-    } catch (error) {
-      console.error('[AUTH] ❌ Erro na autenticação:', error.response?.data || error.message);
-      throw new Error('Falha na autenticação com ClubFix API');
-    }
-  }
-
-  async ensureAuthenticated() {
-    // Verifica se o token existe e ainda é válido
-    if (!this.accessToken || !this.tokenExpiresAt || Date.now() >= this.tokenExpiresAt - 60000) {
-      await this.authenticate();
-    }
-    return this.accessToken;
-  }
-
-  async makeRequest(method, endpoint, data = null, params = null) {
-    await this.ensureAuthenticated();
-
-    const config = {
-      method,
-      url: `${this.baseURL}${endpoint}`,
-      headers: {
-        'Authorization': `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      }
-    };
-
-    if (data) config.data = data;
-    if (params) config.params = params;
-
-    try {
-      const response = await axios(config);
-      return response.data;
-    } catch (error) {
-      console.error(`[API ERROR] ${method} ${endpoint}:`, error.response?.data || error.message);
-      
-      // Se erro 401, tenta renovar token
-      if (error.response?.status === 401) {
-        console.log('[API] Token expirado, renovando...');
-        this.accessToken = null;
-        await this.ensureAuthenticated();
+class ClubFixServiceV2 {
+    constructor() {
+        this.baseURL = process.env.CLUBFIX_BASE_URL || 'https://clubfix.com.br/webservice';
+        this.clientId = process.env.CLUBFIX_CLIENT_ID;
+        this.clientSecret = process.env.CLUBFIX_CLIENT_SECRET;
         
-        // Retry request
-        config.headers.Authorization = `Bearer ${this.accessToken}`;
-        const retryResponse = await axios(config);
-        return retryResponse.data;
-      }
-      
-      throw error;
-    }
-  }
+        this.token = {
+            accessToken: null,
+            expiresAt: null
+        };
+        
+        // Cache para otimização
+        this.cache = {
+            brands: null,
+            models: {},
+            plans: null,
+            lastUpdate: null
+        };
 
-  // ============================================
-  // BRANDS (Marcas)
-  // ============================================
+        // Cliente HTTP
+        this.client = axios.create({
+            timeout: 30000,
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+        });
+        
+        // Configurar baseURL depois da criação
+        this.client.defaults.baseURL = this.baseURL;
 
-  async getBrands() {
-    // Verifica cache
-    if (this.cache.brands && Date.now() - this.cache.brands.timestamp < this.cacheExpiry) {
-      console.log('[CACHE] Usando marcas em cache');
-      return this.cache.brands.data;
-    }
-
-    console.log('[API] Buscando marcas da ClubFix...');
-    const response = await this.makeRequest('GET', '/api/v1/brands');
-    
-    const brands = response.data.map(brand => ({
-      id: brand.id,
-      name: brand.name,
-      status: brand.status || 'active'
-    }));
-
-    // Armazena no cache
-    this.cache.brands = {
-      data: brands,
-      timestamp: Date.now()
-    };
-
-    console.log(`[API] ✅ ${brands.length} marcas carregadas`);
-    return brands;
-  }
-
-  // ============================================
-  // MODELS (Modelos)
-  // ============================================
-
-  async getModels(brandId) {
-    const cacheKey = `brand_${brandId}`;
-    
-    // Verifica cache
-    if (this.cache.models[cacheKey] && Date.now() - this.cache.models[cacheKey].timestamp < this.cacheExpiry) {
-      console.log(`[CACHE] Usando modelos da marca ${brandId} em cache`);
-      return this.cache.models[cacheKey].data;
+        console.log('📱 ClubFix Service v5.0 (Docs Oficiais TI) inicializado');
+        console.log(`Base URL: ${this.baseURL}`);
     }
 
-    console.log(`[API] Buscando modelos da marca ${brandId}...`);
-    const response = await this.makeRequest('GET', `/api/v1/brands/${brandId}/models`);
-    
-    const models = response.data.map(model => ({
-      id: model.id,
-      name: model.name,
-      brandId: brandId,
-      status: model.status || 'active'
-    }));
-
-    // Armazena no cache
-    this.cache.models[cacheKey] = {
-      data: models,
-      timestamp: Date.now()
-    };
-
-    console.log(`[API] ✅ ${models.length} modelos carregados`);
-    return models;
-  }
-
-  // ============================================
-  // QUOTATION (Cotação/Planos)
-  // ============================================
-
-  async getQuotation(modelId, isUsed = false) {
-    const cacheKey = `model_${modelId}_used_${isUsed}`;
-    
-    // Verifica cache
-    if (this.cache.quotations[cacheKey] && Date.now() - this.cache.quotations[cacheKey].timestamp < this.cacheExpiry) {
-      console.log(`[CACHE] Usando cotação do modelo ${modelId} em cache`);
-      return this.cache.quotations[cacheKey].data;
+    /**
+     * Retorna informações do serviço
+     */
+    getInfo() {
+        return {
+            baseURL: this.baseURL,
+            authenticated: !!this.token.accessToken,
+            tokenExpiresAt: this.token.expiresAt,
+            cacheStats: {
+                brands: this.cache.brands ? this.cache.brands.length : 0,
+                models: Object.keys(this.cache.models).length,
+                lastUpdate: this.cache.lastUpdate
+            }
+        };
     }
 
-    console.log(`[API] Buscando cotação para modelo ${modelId} (usado: ${isUsed})...`);
-    const response = await this.makeRequest('GET', '/api/v1/quotation', null, {
-      model_id: modelId,
-      is_used: isUsed
-    });
+    /**
+     * AUTENTICAÇÃO
+     * Endpoint: POST /api-reference/auth
+     * Body: { client_id, client_secret }
+     * Response: { access_token, token_type, expires_in }
+     */
+    async authenticate() {
+        if (!this.clientId || !this.clientSecret) {
+            throw new Error('CLIENT_ID e CLIENT_SECRET são obrigatórios');
+        }
 
-    const quotation = {
-      model: response.data.model,
-      plans: response.data.plans.map(plan => ({
-        id: plan.id,
-        name: plan.name,
-        monthlyPrice: parseFloat(plan.monthly_price),
-        annualPrice: parseFloat(plan.annual_price),
-        coverage: plan.coverage,
-        franchise: plan.franchise,
-        lmi: plan.lmi // Limite Máximo de Indenização
-      }))
-    };
+        console.log('\n🔐 Autenticando na API ClubFix...');
+        console.log(`Client ID: ${this.clientId}`);
 
-    // Armazena no cache
-    this.cache.quotations[cacheKey] = {
-      data: quotation,
-      timestamp: Date.now()
-    };
+        try {
+            // Endpoint conforme documentação oficial do TI
+            const response = await this.client.post('/api-reference/auth', {
+                client_id: this.clientId,
+                client_secret: this.clientSecret
+            });
 
-    console.log(`[API] ✅ ${quotation.plans.length} planos carregados`);
-    return quotation;
-  }
+            if (response.data && response.data.access_token) {
+                this.token.accessToken = response.data.access_token;
+                
+                // Calcular expiração (padrão: 1 hora - 5 min de margem)
+                const expiresIn = response.data.expires_in || 3600;
+                this.token.expiresAt = Date.now() + ((expiresIn - 300) * 1000);
+                
+                // Configurar token no header
+                this.client.defaults.headers['Authorization'] = `Bearer ${this.token.accessToken}`;
+                
+                console.log('✅ Autenticação bem-sucedida!');
+                console.log(`Token expira em: ${expiresIn}s`);
+                
+                return true;
+            }
 
-  // ============================================
-  // CUSTOMER (Cliente)
-  // ============================================
+            throw new Error('Resposta de autenticação inválida');
 
-  async createCustomer(customerData) {
-    console.log('[API] Criando cliente...');
-    const response = await this.makeRequest('POST', '/api/v1/customers', {
-      name: customerData.name,
-      email: customerData.email,
-      document: customerData.document,
-      phone: customerData.phone,
-      birthdate: customerData.birthdate
-    });
+        } catch (error) {
+            console.error('❌ Erro na autenticação:');
+            console.error(`Status: ${error.response?.status}`);
+            console.error(`Status Text: ${error.response?.statusText}`);
+            console.error(`URL: ${this.baseURL}/api-reference/auth`);
+            console.error(`Dados da resposta:`, JSON.stringify(error.response?.data, null, 2));
+            console.error(`Mensagem: ${error.response?.data?.message || error.message}`);
+            console.error(`Erro completo:`, error.message);
+            
+            throw new Error('Falha na autenticação com ClubFix API');
+        }
+    }
 
-    console.log('[API] ✅ Cliente criado com sucesso');
-    return response.data;
-  }
+    /**
+     * Verifica se o token está válido
+     */
+    isTokenValid() {
+        if (!this.token.accessToken) return false;
+        if (!this.token.expiresAt) return false;
+        return Date.now() < this.token.expiresAt;
+    }
 
-  // ============================================
-  // SUBSCRIPTION (Assinatura)
-  // ============================================
+    /**
+     * Garante autenticação válida antes das requisições
+     */
+    async ensureAuthenticated() {
+        if (!this.isTokenValid()) {
+            console.log('Token expirado ou ausente, renovando...');
+            await this.authenticate();
+        }
+    }
 
-  async createSubscription(subscriptionData) {
-    console.log('[API] Criando assinatura...');
-    const response = await this.makeRequest('POST', '/api/v1/subscriptions', {
-      customer: subscriptionData.customer,
-      device: subscriptionData.device,
-      plan: subscriptionData.plan,
-      address: subscriptionData.address
-    });
+    /**
+     * LISTAR MARCAS
+     * Endpoint: GET /api-reference/devices/brands
+     * Headers: Authorization: Bearer {token}
+     * Response: { data: [...], meta: {...} }
+     */
+    async getBrands(forceRefresh = false) {
+        await this.ensureAuthenticated();
 
-    console.log('[API] ✅ Assinatura criada com sucesso');
-    return response.data;
-  }
+        // Usar cache se disponível
+        if (!forceRefresh && this.cache.brands) {
+            console.log('📦 Retornando marcas do cache');
+            return this.cache.brands;
+        }
 
-  async getSubscription(subscriptionId) {
-    console.log(`[API] Buscando assinatura ${subscriptionId}...`);
-    const response = await this.makeRequest('GET', `/api/v1/subscriptions/${subscriptionId}`);
-    return response.data;
-  }
+        try {
+            console.log('🔍 Buscando marcas...');
+            
+            const response = await this.client.get('/api-reference/devices/brands', {
+                params: {
+                    page: 1,
+                    per_page: 100
+                }
+            });
 
-  // ============================================
-  // PAYMENT (Pagamento)
-  // ============================================
+            const brands = response.data?.data || response.data || [];
+            
+            // Atualizar cache
+            this.cache.brands = brands;
+            this.cache.lastUpdate = new Date().toISOString();
+            
+            console.log(`✅ ${brands.length} marcas encontradas`);
+            
+            return brands;
 
-  async generatePixPayment(subscriptionId) {
-    console.log(`[API] Gerando pagamento PIX para assinatura ${subscriptionId}...`);
-    const response = await this.makeRequest('POST', '/api/v1/payments/pix', {
-      subscription_id: subscriptionId
-    });
+        } catch (error) {
+            console.error('❌ Erro ao buscar marcas:');
+            console.error(`Status: ${error.response?.status}`);
+            console.error(`Erro: ${error.response?.data?.message || error.message}`);
+            
+            throw new Error('Falha ao buscar marcas');
+        }
+    }
 
-    console.log('[API] ✅ Pagamento PIX gerado com sucesso');
-    return {
-      pixCode: response.data.pix_code,
-      qrCodeImage: response.data.qr_code_image,
-      expiresAt: response.data.expires_at,
-      amount: response.data.amount
-    };
-  }
+    /**
+     * LISTAR MODELOS
+     * Endpoint: GET /api-reference/devices/models
+     * Query: brand_id={id}
+     * Headers: Authorization: Bearer {token}
+     * Response: { data: [...], meta: {...} }
+     */
+    async getModels(brandId, forceRefresh = false) {
+        await this.ensureAuthenticated();
 
-  async processCreditCardPayment(subscriptionId, cardData) {
-    console.log(`[API] Processando pagamento com cartão para assinatura ${subscriptionId}...`);
-    const response = await this.makeRequest('POST', '/api/v1/payments/credit-card', {
-      subscription_id: subscriptionId,
-      card_number: cardData.number,
-      card_holder: cardData.holder,
-      card_expiry: cardData.expiry,
-      card_cvv: cardData.cvv
-    });
+        if (!brandId) {
+            throw new Error('brandId é obrigatório');
+        }
 
-    console.log('[API] ✅ Pagamento processado com sucesso');
-    return response.data;
-  }
+        // Usar cache se disponível
+        if (!forceRefresh && this.cache.models[brandId]) {
+            console.log(`📦 Retornando modelos da marca ${brandId} do cache`);
+            return this.cache.models[brandId];
+        }
 
-  // ============================================
-  // CACHE
-  // ============================================
+        try {
+            console.log(`🔍 Buscando modelos da marca ${brandId}...`);
+            
+            const response = await this.client.get('/api-reference/devices/models', {
+                params: {
+                    brand_id: brandId,
+                    page: 1,
+                    per_page: 100
+                }
+            });
 
-  clearCache() {
-    console.log('[CACHE] Limpando cache...');
-    this.cache = {
-      brands: null,
-      models: {},
-      quotations: {}
-    };
-    console.log('[CACHE] ✅ Cache limpo');
-  }
+            const models = response.data?.data || response.data || [];
+            
+            // Atualizar cache
+            this.cache.models[brandId] = models;
+            
+            console.log(`✅ ${models.length} modelos encontrados`);
+            
+            return models;
+
+        } catch (error) {
+            console.error('❌ Erro ao buscar modelos:');
+            console.error(`Status: ${error.response?.status}`);
+            console.error(`Erro: ${error.response?.data?.message || error.message}`);
+            
+            throw new Error('Falha ao buscar modelos');
+        }
+    }
+
+    /**
+     * BUSCAR PLANOS
+     * Endpoint: GET /api-reference/subscriptions/plans
+     * Headers: Authorization: Bearer {token}
+     */
+    async getPlans(forceRefresh = false) {
+        await this.ensureAuthenticated();
+
+        // Usar cache se disponível
+        if (!forceRefresh && this.cache.plans) {
+            console.log('📦 Retornando planos do cache');
+            return this.cache.plans;
+        }
+
+        try {
+            console.log('🔍 Buscando planos...');
+            
+            const response = await this.client.get('/api-reference/subscriptions/plans', {
+                params: {
+                    page: 1,
+                    per_page: 100
+                }
+            });
+
+            const plans = response.data?.data || response.data || [];
+            
+            // Atualizar cache
+            this.cache.plans = plans;
+            
+            console.log(`✅ ${plans.length} planos encontrados`);
+            
+            return plans;
+
+        } catch (error) {
+            console.error('❌ Erro ao buscar planos:');
+            console.error(`Status: ${error.response?.status}`);
+            console.error(`Erro: ${error.response?.data?.message || error.message}`);
+            
+            throw new Error('Falha ao buscar planos');
+        }
+    }
+
+    /**
+     * COTAÇÃO
+     * Endpoint: GET /api-reference/subscriptions/quotation
+     * Query: model_id={id}&is_used={boolean}
+     * Headers: Authorization: Bearer {token}
+     */
+    async getQuotation(modelId, isUsed = false) {
+        await this.ensureAuthenticated();
+
+        if (!modelId) {
+            throw new Error('modelId é obrigatório');
+        }
+
+        try {
+            console.log(`🔍 Buscando cotação para modelo ${modelId}...`);
+            
+            const response = await this.client.get('/api-reference/subscriptions/quotation', {
+                params: {
+                    model_id: modelId,
+                    is_used: isUsed
+                }
+            });
+
+            const quotation = response.data?.data || response.data;
+            
+            console.log('✅ Cotação obtida com sucesso');
+            
+            return quotation;
+
+        } catch (error) {
+            console.error('❌ Erro ao buscar cotação:');
+            console.error(`Status: ${error.response?.status}`);
+            console.error(`Erro: ${error.response?.data?.message || error.message}`);
+            
+            throw new Error('Falha ao buscar cotação');
+        }
+    }
+
+    /**
+     * CRIAR CLIENTE
+     * Endpoint: POST /api-reference/customers
+     * Body: { name, cpf, email, phone, ... }
+     * Headers: Authorization: Bearer {token}
+     */
+    async createCustomer(customerData) {
+        await this.ensureAuthenticated();
+
+        try {
+            console.log('👤 Criando cliente...');
+            
+            const response = await this.client.post('/api-reference/customers', customerData);
+            
+            console.log('✅ Cliente criado com sucesso');
+            
+            return response.data;
+
+        } catch (error) {
+            console.error('❌ Erro ao criar cliente:');
+            console.error(`Status: ${error.response?.status}`);
+            console.error(`Erro: ${error.response?.data?.message || error.message}`);
+            
+            throw new Error('Falha ao criar cliente');
+        }
+    }
+
+    /**
+     * CRIAR ASSINATURA
+     * Endpoint: POST /api-reference/subscriptions
+     * Body: { customer_id, plan_id, model_id, ... }
+     * Headers: Authorization: Bearer {token}
+     */
+    async createSubscription(subscriptionData) {
+        await this.ensureAuthenticated();
+
+        try {
+            console.log('📝 Criando assinatura...');
+            
+            const response = await this.client.post('/api-reference/subscriptions', subscriptionData);
+            
+            console.log('✅ Assinatura criada com sucesso');
+            
+            return response.data;
+
+        } catch (error) {
+            console.error('❌ Erro ao criar assinatura:');
+            console.error(`Status: ${error.response?.status}`);
+            console.error(`Erro: ${error.response?.data?.message || error.message}`);
+            
+            throw new Error('Falha ao criar assinatura');
+        }
+    }
+
+    /**
+     * PAGAMENTO PIX
+     * Endpoint: POST /api-reference/payment/pix
+     * Body: { subscription_id, ... }
+     * Headers: Authorization: Bearer {token}
+     */
+    async createPixPayment(paymentData) {
+        await this.ensureAuthenticated();
+
+        try {
+            console.log('💰 Criando pagamento PIX...');
+            
+            const response = await this.client.post('/api-reference/payment/pix', paymentData);
+            
+            console.log('✅ Pagamento PIX criado com sucesso');
+            
+            return response.data;
+
+        } catch (error) {
+            console.error('❌ Erro ao criar pagamento PIX:');
+            console.error(`Status: ${error.response?.status}`);
+            console.error(`Erro: ${error.response?.data?.message || error.message}`);
+            
+            throw new Error('Falha ao criar pagamento PIX');
+        }
+    }
+
+    /**
+     * PAGAMENTO CARTÃO DE CRÉDITO
+     * Endpoint: POST /api-reference/payment/credit-card
+     * Body: { subscription_id, card_data, ... }
+     * Headers: Authorization: Bearer {token}
+     */
+    async createCreditCardPayment(paymentData) {
+        await this.ensureAuthenticated();
+
+        try {
+            console.log('💳 Criando pagamento com cartão...');
+            
+            const response = await this.client.post('/api-reference/payment/credit-card', paymentData);
+            
+            console.log('✅ Pagamento com cartão criado com sucesso');
+            
+            return response.data;
+
+        } catch (error) {
+            console.error('❌ Erro ao criar pagamento com cartão:');
+            console.error(`Status: ${error.response?.status}`);
+            console.error(`Erro: ${error.response?.data?.message || error.message}`);
+            
+            throw new Error('Falha ao criar pagamento com cartão');
+        }
+    }
+
+    /**
+     * Limpar cache
+     */
+    clearCache() {
+        this.cache = {
+            brands: null,
+            models: {},
+            plans: null,
+            lastUpdate: null
+        };
+        console.log('🗑️ Cache limpo');
+    }
 }
 
-// Singleton instance
-const clubfixService = new ClubFixService();
+// Criar instância única (singleton)
+const clubfixService = new ClubFixServiceV2();
+
 module.exports = clubfixService;
