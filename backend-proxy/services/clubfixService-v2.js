@@ -53,7 +53,14 @@ class ClubFixServiceV2 {
             console.log('🔐 Autenticando na API ClubFix...');
             
 const response = await this.client.post('/oauth/token', {
-    grant_type: 'client_credentials',                client_id: this.clientId,
+    grant_type: 'client_credentials',
+    client_id: this.clientId,
+    client_secret: this.clientSecret
+});const response = await this.client.post('/oauth/token', {
+    grant_type: 'client_credentials',
+    client_id: this.clientId,
+    client_secret: this.clientSecret
+});    grant_type: 'client_credentials',                client_id: this.clientId,
                 client_secret: this.clientSecret
             });
             
