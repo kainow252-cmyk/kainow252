@@ -1,18 +1,19 @@
 /**
- * ClubFix API Service - v3.0 (Login Web)
+ * ClubFix API Service - v4.0 (Autenticação Completa)
  * 
- * Autenticação via X-CREDENTIALS (email:password em Base64)
- * Documentação: https://docs.clubfix.com.br/api-reference/introduction
+ * Testa TODOS os formatos possíveis de autenticação
  */
 
 const axios = require('axios');
 
-class ClubFixServiceV3 {
+class ClubFixServiceV4 {
     constructor() {
         // Configuração da API
         this.baseURL = process.env.CLUBFIX_BASE_URL || 'https://clubfix.com.br/webservice';
         this.email = process.env.CLUBFIX_EMAIL || 'kainow@clubfix.com.br';
         this.password = process.env.CLUBFIX_PASSWORD || 'Kainow@27923746';
+        this.clientId = process.env.CLUBFIX_CLIENT_ID;
+        this.clientSecret = process.env.CLUBFIX_CLIENT_SECRET;
         
         // Token de autenticação
         this.token = {
@@ -37,106 +38,178 @@ class ClubFixServiceV3 {
             timeout: 30000
         });
         
-        // Configurar baseURL após criar a instância
         this.client.defaults.baseURL = this.baseURL;
         
-        console.log('📱 ClubFix Service v3.0 (Login Web) inicializado');
+        console.log('📱 ClubFix Service v4.0 (Auth Completo) inicializado');
         console.log('   Base URL:', this.baseURL);
-        console.log('   Email:', this.email);
     }
     
-    /**
-     * 📊 INFORMAÇÕES DO SERVIÇO
-     */
     getInfo() {
         return {
             baseURL: this.baseURL,
             email: this.email,
             authenticated: !!this.token.accessToken,
-            tokenExpires: this.token.expiresAt ? new Date(this.token.expiresAt).toISOString() : null,
-            cacheStatus: {
-                brands: !!this.cache.brands,
-                modelsCount: Object.keys(this.cache.models).length,
-                plansCount: Object.keys(this.cache.plans).length
-            }
+            tokenExpires: this.token.expiresAt ? new Date(this.token.expiresAt).toISOString() : null
         };
     }
     
     /**
-     * 🔐 AUTENTICAÇÃO VIA LOGIN WEB (X-CREDENTIALS)
+     * 🔐 AUTENTICAÇÃO - TESTA TODOS OS FORMATOS
      */
     async authenticate() {
         try {
-            console.log('🔐 Autenticando via Login Web...');
+            console.log('🔐 Autenticando na API ClubFix...');
             console.log('   Email:', this.email);
             console.log('   Password:', this.password ? '***' : 'FALTANDO');
             
-            // Criar X-CREDENTIALS (Base64 de "email:password")
+            // Criar X-CREDENTIALS (Base64)
             const credentials = Buffer.from(`${this.email}:${this.password}`).toString('base64');
-            console.log('   X-CREDENTIALS:', credentials.substring(0, 20) + '...');
             
-            // Tentar múltiplos endpoints e métodos
+            // TESTAR 10 FORMATOS DIFERENTES!
             const authAttempts = [
-                // Tentativa 1: POST /auth/login com X-CREDENTIALS
+                // 1. POST /auth/login com email/password no body
                 {
+                    name: 'POST /auth/login (body: email/password)',
+                    method: 'POST',
+                    endpoint: '/auth/login',
+                    headers: {},
+                    body: { 
+                        email: this.email, 
+                        password: this.password 
+                    }
+                },
+                // 2. POST /auth/login com X-CREDENTIALS header
+                {
+                    name: 'POST /auth/login (header: X-CREDENTIALS)',
                     method: 'POST',
                     endpoint: '/auth/login',
                     headers: { 'X-CREDENTIALS': credentials },
                     body: {}
                 },
-                // Tentativa 2: POST /auth com email/password no body
+                // 3. POST /auth/login com username/password
                 {
+                    name: 'POST /auth/login (body: username/password)',
+                    method: 'POST',
+                    endpoint: '/auth/login',
+                    headers: {},
+                    body: { 
+                        username: this.email, 
+                        password: this.password 
+                    }
+                },
+                // 4. POST /auth/login com login/password
+                {
+                    name: 'POST /auth/login (body: login/password)',
+                    method: 'POST',
+                    endpoint: '/auth/login',
+                    headers: {},
+                    body: { 
+                        login: this.email, 
+                        password: this.password 
+                    }
+                },
+                // 5. POST /api-reference/auth com client_id/client_secret
+                {
+                    name: 'POST /api-reference/auth (OAuth)',
+                    method: 'POST',
+                    endpoint: '/api-reference/auth',
+                    headers: {},
+                    body: {
+                        client_id: this.clientId,
+                        client_secret: this.clientSecret
+                    }
+                },
+                // 6. POST /auth/login com credentials no body
+                {
+                    name: 'POST /auth/login (body: credentials base64)',
+                    method: 'POST',
+                    endpoint: '/auth/login',
+                    headers: {},
+                    body: { 
+                        credentials: credentials 
+                    }
+                },
+                // 7. POST /login com email/password
+                {
+                    name: 'POST /login (body: email/password)',
+                    method: 'POST',
+                    endpoint: '/login',
+                    headers: {},
+                    body: { 
+                        email: this.email, 
+                        password: this.password 
+                    }
+                },
+                // 8. POST /auth/login com Authorization Basic
+                {
+                    name: 'POST /auth/login (Authorization: Basic)',
+                    method: 'POST',
+                    endpoint: '/auth/login',
+                    headers: { 'Authorization': `Basic ${credentials}` },
+                    body: {}
+                },
+                // 9. POST /webservice/auth/login
+                {
+                    name: 'POST direto (full URL)',
+                    method: 'POST',
+                    endpoint: '/auth/login',
+                    headers: {},
+                    body: { 
+                        email: this.email, 
+                        password: this.password,
+                        grant_type: 'password'
+                    }
+                },
+                // 10. POST /auth com email/password e client_id
+                {
+                    name: 'POST /auth (hybrid)',
                     method: 'POST',
                     endpoint: '/auth',
                     headers: {},
-                    body: { email: this.email, password: this.password }
-                },
-                // Tentativa 3: POST /api-reference/auth com X-CREDENTIALS
-                {
-                    method: 'POST',
-                    endpoint: '/api-reference/auth',
-                    headers: { 'X-CREDENTIALS': credentials },
-                    body: {}
-                },
-                // Tentativa 4: GET /auth/login com X-CREDENTIALS
-                {
-                    method: 'GET',
-                    endpoint: '/auth/login',
-                    headers: { 'X-CREDENTIALS': credentials },
-                    body: null
+                    body: { 
+                        email: this.email, 
+                        password: this.password,
+                        client_id: this.clientId,
+                        client_secret: this.clientSecret
+                    }
                 }
             ];
             
             let response = null;
             let lastError = null;
+            let workingMethod = null;
             
             for (const attempt of authAttempts) {
                 try {
-                    console.log(`🔍 Tentando: ${attempt.method} ${attempt.endpoint}`);
+                    console.log(`\n🔍 Tentando: ${attempt.name}`);
+                    console.log(`   Endpoint: ${attempt.endpoint}`);
+                    console.log(`   Headers:`, Object.keys(attempt.headers).length > 0 ? Object.keys(attempt.headers) : 'Nenhum');
+                    console.log(`   Body:`, Object.keys(attempt.body).length > 0 ? Object.keys(attempt.body) : 'Vazio');
                     
                     const config = {
                         headers: attempt.headers
                     };
                     
-                    if (attempt.method === 'POST') {
-                        response = await this.client.post(attempt.endpoint, attempt.body, config);
-                    } else {
-                        response = await this.client.get(attempt.endpoint, config);
-                    }
+                    response = await this.client.post(attempt.endpoint, attempt.body, config);
                     
-                    console.log(`✅ Autenticação funcionou: ${attempt.method} ${attempt.endpoint}`);
-                    console.log('   Resposta:', JSON.stringify(response.data).substring(0, 100) + '...');
+                    console.log(`✅ SUCESSO! Método funcionou: ${attempt.name}`);
+                    console.log(`   Status: ${response.status}`);
+                    console.log(`   Resposta:`, JSON.stringify(response.data).substring(0, 200) + '...');
+                    
+                    workingMethod = attempt.name;
                     break;
                 } catch (error) {
-                    console.log(`❌ Falhou: ${attempt.method} ${attempt.endpoint}`);
-                    console.log('   Status:', error.response?.status || 'N/A');
-                    console.log('   Erro:', error.response?.data?.message || error.message);
+                    console.log(`❌ Falhou: ${attempt.name}`);
+                    console.log(`   Status: ${error.response?.status || 'N/A'}`);
+                    console.log(`   Erro: ${error.response?.data?.message || error.message}`);
+                    
                     lastError = error;
                 }
             }
             
             if (!response) {
-                console.error('❌ Nenhum método de autenticação funcionou');
+                console.error('\n❌ NENHUM MÉTODO DE AUTENTICAÇÃO FUNCIONOU!');
+                console.error('   Total de tentativas:', authAttempts.length);
                 console.error('   Último erro:', lastError.message);
                 if (lastError.response) {
                     console.error('   Status:', lastError.response.status);
@@ -146,8 +219,8 @@ class ClubFixServiceV3 {
             }
             
             // Extrair token da resposta
-            const { access_token, token, expires_in } = response.data;
-            const authToken = access_token || token;
+            const { access_token, token, expires_in, data } = response.data;
+            const authToken = access_token || token || data?.access_token || data?.token;
             
             if (!authToken) {
                 console.error('❌ Token não encontrado na resposta');
@@ -155,7 +228,7 @@ class ClubFixServiceV3 {
                 throw new Error('Token não retornado pela API ClubFix');
             }
             
-            // Calcular tempo de expiração (padrão 1 hora se não especificado)
+            // Calcular expiração
             const expirationTime = expires_in || 3600;
             const expiresAt = Date.now() + ((expirationTime - 300) * 1000);
             
@@ -164,35 +237,29 @@ class ClubFixServiceV3 {
                 expiresAt: expiresAt
             };
             
-            // Atualizar header de autorização
+            // Atualizar header
             this.client.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
             
-            console.log('✅ Autenticação bem-sucedida');
-            console.log(`🎫 Token obtido (expira em ${expirationTime}s)`);
+            console.log('\n✅ AUTENTICAÇÃO BEM-SUCEDIDA!');
+            console.log(`   Método usado: ${workingMethod}`);
+            console.log(`   Token: ${authToken.substring(0, 30)}...`);
+            console.log(`   Expira em: ${expirationTime}s`);
             
             return true;
         } catch (error) {
-            console.error('❌ Erro fatal na autenticação:', error.message);
+            console.error('\n❌ Erro fatal na autenticação:', error.message);
             throw error;
         }
     }
     
-    /**
-     * ✅ GARANTIR AUTENTICAÇÃO
-     */
     async ensureAuthenticated() {
         if (!this.token.accessToken || Date.now() >= this.token.expiresAt) {
-            console.log('🔄 Token expirado ou ausente, renovando...');
             await this.authenticate();
         }
     }
     
-    /**
-     * 📱 BUSCAR MARCAS
-     */
     async getBrands(page = 1, perPage = 50) {
         try {
-            // Verificar cache (válido por 1 hora)
             if (this.cache.brands && this.cache.lastUpdate && 
                 (Date.now() - this.cache.lastUpdate < 3600000)) {
                 console.log('📦 Usando marcas do cache');
@@ -213,7 +280,6 @@ class ClubFixServiceV3 {
                 createdAt: brand.created_at
             }));
             
-            // Atualizar cache
             this.cache.brands = brands;
             this.cache.lastUpdate = Date.now();
             
@@ -225,14 +291,10 @@ class ClubFixServiceV3 {
         }
     }
     
-    /**
-     * 📱 BUSCAR MODELOS POR MARCA
-     */
     async getModels(brandId, page = 1, perPage = 100) {
         try {
             const cacheKey = `${brandId}_${page}_${perPage}`;
             
-            // Verificar cache
             if (this.cache.models[cacheKey]) {
                 console.log(`📦 Usando modelos do cache (marca ${brandId})`);
                 return this.cache.models[cacheKey];
@@ -242,15 +304,14 @@ class ClubFixServiceV3 {
             
             console.log(`📱 Buscando modelos da marca ${brandId}...`);
             
-            // Tentar múltiplos endpoints para modelos
             const endpoints = [
-                {
-                    url: '/models',
-                    params: { filter: { brand: brandId }, page, per_page: perPage }
-                },
                 {
                     url: '/api-reference/devices/models',
                     params: { brand_id: brandId, page, per_page: perPage }
+                },
+                {
+                    url: '/models',
+                    params: { filter: { brand: brandId }, page, per_page: perPage }
                 },
                 {
                     url: `/brands/${brandId}`,
@@ -274,7 +335,6 @@ class ClubFixServiceV3 {
             }
             
             if (!response) {
-                console.error('❌ Nenhum endpoint de modelos funcionou');
                 throw lastError;
             }
             
@@ -286,7 +346,6 @@ class ClubFixServiceV3 {
                 status: model.status
             }));
             
-            // Atualizar cache
             this.cache.models[cacheKey] = models;
             
             console.log(`✅ ${models.length} modelos carregados`);
@@ -297,34 +356,28 @@ class ClubFixServiceV3 {
         }
     }
     
-    /**
-     * 💰 BUSCAR COTAÇÃO
-     */
     async getQuotation(modelId, isUsed = false) {
         try {
             const cacheKey = `${modelId}_${isUsed}`;
             
-            // Verificar cache (válido por 30 minutos)
             if (this.cache.plans[cacheKey] && 
                 (Date.now() - this.cache.plans[cacheKey].timestamp < 1800000)) {
-                console.log(`📦 Usando cotação do cache (modelo ${modelId})`);
+                console.log(`📦 Usando cotação do cache`);
                 return this.cache.plans[cacheKey].data;
             }
             
             await this.ensureAuthenticated();
             
-            console.log(`💰 Buscando cotação para modelo ${modelId}...`);
+            console.log(`💰 Buscando cotação...`);
             
-            // Tentar múltiplos endpoints para cotação
             const endpoints = [
                 '/quotation',
+                '/api-reference/subscriptions/quotation',
                 '/plans/quotation',
-                '/subscriptions/quotation',
-                '/api-reference/subscriptions/quotation'
+                '/subscriptions/quotation'
             ];
             
             let response = null;
-            let lastError = null;
             
             for (const endpoint of endpoints) {
                 try {
@@ -336,13 +389,11 @@ class ClubFixServiceV3 {
                     break;
                 } catch (error) {
                     console.log(`❌ Falhou: ${endpoint}`);
-                    lastError = error;
                 }
             }
             
             if (!response) {
-                console.error('❌ Nenhum endpoint de cotação funcionou');
-                throw lastError;
+                throw new Error('Nenhum endpoint de cotação funcionou');
             }
             
             const quotationData = response.data.data;
@@ -365,7 +416,6 @@ class ClubFixServiceV3 {
                 }))
             };
             
-            // Atualizar cache
             this.cache.plans[cacheKey] = {
                 data: quotation,
                 timestamp: Date.now()
@@ -379,11 +429,7 @@ class ClubFixServiceV3 {
         }
     }
     
-    /**
-     * 🗑️ LIMPAR CACHE
-     */
     clearCache() {
-        console.log('🗑️ Limpando cache...');
         this.cache = {
             brands: null,
             models: {},
@@ -394,7 +440,6 @@ class ClubFixServiceV3 {
     }
 }
 
-// Singleton
-const clubfixService = new ClubFixServiceV3();
+const clubfixService = new ClubFixServiceV4();
 
 module.exports = clubfixService;
