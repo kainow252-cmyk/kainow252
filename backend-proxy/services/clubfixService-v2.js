@@ -74,42 +74,61 @@ class ClubFixServiceV2 {
         console.log('\n🔐 Autenticando na API ClubFix...');
         console.log(`Client ID: ${this.clientId}`);
 
-        try {
-            // Endpoint conforme documentação oficial do TI
-            const response = await this.client.post('/api-reference/auth', {
-                client_id: this.clientId,
-                client_secret: this.clientSecret
-            });
+        // Endpoints possíveis para testar
+        const authEndpoints = [
+            '/oauth/token',
+            '/auth/token',
+            '/api/auth',
+            '/api/oauth/token',
+            '/token',
+            '/api-reference/auth',
+            '/auth/oauth/token',
+            '/v1/oauth/token'
+        ];
 
-            if (response.data && response.data.access_token) {
-                this.token.accessToken = response.data.access_token;
+        // Testar cada endpoint
+        for (const endpoint of authEndpoints) {
+            try {
+                console.log(`\n🔍 Tentando: POST ${endpoint}`);
                 
-                // Calcular expiração (padrão: 1 hora - 5 min de margem)
-                const expiresIn = response.data.expires_in || 3600;
-                this.token.expiresAt = Date.now() + ((expiresIn - 300) * 1000);
+                const response = await this.client.post(endpoint, {
+                    client_id: this.clientId,
+                    client_secret: this.clientSecret,
+                    grant_type: 'client_credentials'
+                });
+
+                if (response.data && response.data.access_token) {
+                    this.token.accessToken = response.data.access_token;
+                    
+                    // Calcular expiração (padrão: 1 hora - 5 min de margem)
+                    const expiresIn = response.data.expires_in || 3600;
+                    this.token.expiresAt = Date.now() + ((expiresIn - 300) * 1000);
+                    
+                    // Configurar token no header
+                    this.client.defaults.headers['Authorization'] = `Bearer ${this.token.accessToken}`;
+                    
+                    console.log(`\n✅ SUCESSO! Endpoint correto: ${endpoint}`);
+                    console.log(`Token expira em: ${expiresIn}s`);
+                    
+                    return true;
+                }
+
+            } catch (error) {
+                const status = error.response?.status;
+                console.log(`   ❌ Falhou: Status ${status || 'N/A'}`);
                 
-                // Configurar token no header
-                this.client.defaults.headers['Authorization'] = `Bearer ${this.token.accessToken}`;
-                
-                console.log('✅ Autenticação bem-sucedida!');
-                console.log(`Token expira em: ${expiresIn}s`);
-                
-                return true;
+                // Se não for 404 ou 405, pode ser problema de credenciais
+                if (status && status !== 404 && status !== 405) {
+                    console.error(`\n❌ Erro ${status} em ${endpoint}:`);
+                    console.error(`Dados:`, JSON.stringify(error.response?.data, null, 2));
+                }
             }
-
-            throw new Error('Resposta de autenticação inválida');
-
-        } catch (error) {
-            console.error('❌ Erro na autenticação:');
-            console.error(`Status: ${error.response?.status}`);
-            console.error(`Status Text: ${error.response?.statusText}`);
-            console.error(`URL: ${this.baseURL}/api-reference/auth`);
-            console.error(`Dados da resposta:`, JSON.stringify(error.response?.data, null, 2));
-            console.error(`Mensagem: ${error.response?.data?.message || error.message}`);
-            console.error(`Erro completo:`, error.message);
-            
-            throw new Error('Falha na autenticação com ClubFix API');
         }
+
+        // Nenhum endpoint funcionou
+        console.error('\n❌ NENHUM ENDPOINT DE AUTENTICAÇÃO FUNCIONOU!');
+        console.error('Endpoints testados:', authEndpoints);
+        throw new Error('Falha na autenticação com ClubFix API - endpoint não encontrado');
     }
 
     /**
