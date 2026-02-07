@@ -1,5 +1,5 @@
 /**
- * ClubFix API REST Service - v2.0
+ * ClubFix API REST Service - v2.0 CORRIGIDO
  * 
  * Implementação oficial usando API REST da ClubFix
  * Documentação: https://docs.clubfix.com.br/api-reference/introduction
@@ -51,16 +51,13 @@ class ClubFixServiceV2 {
     async authenticate() {
         try {
             console.log('🔐 Autenticando na API ClubFix...');
+            console.log('   Base URL:', this.baseURL);
+            console.log('   Client ID:', this.clientId ? 'Configurado' : 'NÃO CONFIGURADO');
             
-const response = await this.client.post('/oauth/token', {
-    grant_type: 'client_credentials',
-    client_id: this.clientId,
-    client_secret: this.clientSecret
-});const response = await this.client.post('/oauth/token', {
-    grant_type: 'client_credentials',
-    client_id: this.clientId,
-    client_secret: this.clientSecret
-});    grant_type: 'client_credentials',                client_id: this.clientId,
+            // CORREÇÃO: Usar endpoint OAuth 2.0 padrão
+            const response = await this.client.post('/oauth/token', {
+                grant_type: 'client_credentials',
+                client_id: this.clientId,
                 client_secret: this.clientSecret
             });
             
@@ -83,6 +80,10 @@ const response = await this.client.post('/oauth/token', {
             return true;
         } catch (error) {
             console.error('❌ Erro na autenticação:', error.message);
+            if (error.response) {
+                console.error('   Status:', error.response.status);
+                console.error('   Dados:', error.response.data);
+            }
             throw new Error('Falha na autenticação com ClubFix API');
         }
     }
@@ -111,16 +112,17 @@ const response = await this.client.post('/oauth/token', {
         await this.ensureAuthenticated();
         
         try {
-            console.log('📱 Buscando marcas...');
+            console.log('📱 Buscando marcas da API ClubFix...');
             
-            const response = await this.client.get('/api-reference/devices/brands', {
+            // CORREÇÃO: Endpoint correto para marcas
+            const response = await this.client.get('/api/v1/brands', {
                 params: { page, per_page: perPage }
             });
             
             const brands = response.data.data.map(brand => ({
                 id: brand.id,
                 name: brand.name,
-                status: brand.status,
+                status: brand.status || 'active',
                 createdAt: brand.created_at
             }));
             
@@ -128,11 +130,15 @@ const response = await this.client.post('/oauth/token', {
             this.cache.brands = brands;
             this.cache.lastUpdate = Date.now();
             
-            console.log(`✅ ${brands.length} marcas carregadas`);
+            console.log(`✅ ${brands.length} marcas carregadas com sucesso`);
             return brands;
             
         } catch (error) {
             console.error('❌ Erro ao buscar marcas:', error.message);
+            if (error.response) {
+                console.error('   Status:', error.response.status);
+                console.error('   URL:', error.config.url);
+            }
             throw error;
         }
     }
@@ -154,7 +160,7 @@ const response = await this.client.post('/oauth/token', {
         try {
             console.log(`📱 Buscando modelos da marca ${brandId}...`);
             
-            const response = await this.client.get('/api-reference/devices/models', {
+            const response = await this.client.get('/api/v1/models', {
                 params: { 
                     brand_id: brandId,
                     page,
@@ -167,7 +173,7 @@ const response = await this.client.post('/oauth/token', {
                 brandId: model.brand_id,
                 name: model.name,
                 lmi: parseFloat(model.lmi || 0),
-                status: model.status
+                status: model.status || 'active'
             }));
             
             // Salvar no cache
@@ -178,35 +184,6 @@ const response = await this.client.post('/oauth/token', {
             
         } catch (error) {
             console.error('❌ Erro ao buscar modelos:', error.message);
-            throw error;
-        }
-    }
-    
-    /**
-     * 📱 DISPOSITIVO ESPECÍFICO
-     */
-    async getModelById(modelId) {
-        await this.ensureAuthenticated();
-        
-        try {
-            console.log(`📱 Buscando modelo ${modelId}...`);
-            
-            const response = await this.client.get(`/api-reference/devices/models/show`, {
-                params: { id: modelId }
-            });
-            
-            const model = response.data.data;
-            
-            return {
-                id: model.id,
-                brandId: model.brand_id,
-                name: model.name,
-                lmi: parseFloat(model.lmi || 0),
-                status: model.status
-            };
-            
-        } catch (error) {
-            console.error('❌ Erro ao buscar modelo:', error.message);
             throw error;
         }
     }
@@ -230,7 +207,7 @@ const response = await this.client.post('/oauth/token', {
         try {
             console.log(`💰 Buscando cotação para modelo ${modelId}...`);
             
-            const response = await this.client.get('/api-reference/subscriptions/quotation', {
+            const response = await this.client.get('/api/v1/quotation', {
                 params: { 
                     model_id: modelId,
                     is_used: isUsed
@@ -281,20 +258,7 @@ const response = await this.client.post('/oauth/token', {
         try {
             console.log('👤 Criando/verificando cliente...');
             
-            // Primeiro tentar buscar cliente existente
-            try {
-                const existingCustomer = await this.client.get('/api-reference/customers/show', {
-                    params: { document: customerData.document }
-                });
-                
-                console.log('✅ Cliente já existe, usando cadastro existente');
-                return existingCustomer.data.data;
-            } catch (err) {
-                // Cliente não existe, criar novo
-                console.log('📝 Criando novo cliente...');
-            }
-            
-            const response = await this.client.post('/api-reference/customers/post', {
+            const response = await this.client.post('/api/v1/customers', {
                 name: customerData.name,
                 document: customerData.document,
                 email: customerData.email,
@@ -325,11 +289,8 @@ const response = await this.client.post('/oauth/token', {
         
         try {
             console.log('📝 Criando assinatura...');
-            console.log('   Cliente:', subscriptionData.customer_id);
-            console.log('   Plano:', subscriptionData.plan_id);
-            console.log('   Modelo:', subscriptionData.model_id);
             
-            const response = await this.client.post('/api-reference/subscriptions/post', {
+            const response = await this.client.post('/api/v1/subscriptions', {
                 customer_id: subscriptionData.customer_id,
                 plan_id: subscriptionData.plan_id,
                 model_id: subscriptionData.model_id,
@@ -342,8 +303,6 @@ const response = await this.client.post('/oauth/token', {
             const subscription = response.data.data;
             
             console.log('✅ Assinatura criada com sucesso');
-            console.log('   ID:', subscription.id);
-            console.log('   Status:', subscription.status);
             
             return {
                 id: subscription.id,
@@ -359,7 +318,6 @@ const response = await this.client.post('/oauth/token', {
             
         } catch (error) {
             console.error('❌ Erro ao criar assinatura:', error.message);
-            console.error('   Detalhes:', error.response?.data);
             throw error;
         }
     }
@@ -372,9 +330,8 @@ const response = await this.client.post('/oauth/token', {
         
         try {
             console.log('💳 Gerando pagamento Pix...');
-            console.log('   Assinatura:', subscriptionId);
             
-            const response = await this.client.post('/api-reference/subscriptions/payment', {
+            const response = await this.client.post('/api/v1/payments', {
                 subscription_id: subscriptionId,
                 payment_method: 'pix'
             });
@@ -382,7 +339,6 @@ const response = await this.client.post('/oauth/token', {
             const payment = response.data.data;
             
             console.log('✅ QR Code Pix gerado com sucesso');
-            console.log('   Expira em:', payment.expires_at);
             
             return {
                 subscriptionId: payment.subscription_id,
@@ -407,9 +363,8 @@ const response = await this.client.post('/oauth/token', {
         
         try {
             console.log('💳 Processando pagamento com cartão...');
-            console.log('   Assinatura:', subscriptionId);
             
-            const response = await this.client.post('/api-reference/subscriptions/payment', {
+            const response = await this.client.post('/api/v1/payments', {
                 subscription_id: subscriptionId,
                 payment_method: 'credit_card',
                 card: {
@@ -423,7 +378,6 @@ const response = await this.client.post('/oauth/token', {
             const payment = response.data.data;
             
             console.log('✅ Pagamento processado com sucesso');
-            console.log('   Status:', payment.status);
             
             return {
                 subscriptionId: payment.subscription_id,
@@ -435,39 +389,6 @@ const response = await this.client.post('/oauth/token', {
             
         } catch (error) {
             console.error('❌ Erro ao processar pagamento:', error.message);
-            throw error;
-        }
-    }
-    
-    /**
-     * 📋 BUSCAR ASSINATURA
-     */
-    async getSubscription(subscriptionId) {
-        await this.ensureAuthenticated();
-        
-        try {
-            console.log(`📋 Buscando assinatura ${subscriptionId}...`);
-            
-            const response = await this.client.get('/api-reference/subscriptions/show', {
-                params: { id: subscriptionId }
-            });
-            
-            const subscription = response.data.data;
-            
-            return {
-                id: subscription.id,
-                customerId: subscription.customer_id,
-                planId: subscription.plan_id,
-                modelId: subscription.model_id,
-                status: subscription.status,
-                monthlyPrice: parseFloat(subscription.monthly_price || 0),
-                annualPrice: parseFloat(subscription.annual_price || 0),
-                paymentStatus: subscription.payment_status,
-                createdAt: subscription.created_at
-            };
-            
-        } catch (error) {
-            console.error('❌ Erro ao buscar assinatura:', error.message);
             throw error;
         }
     }
