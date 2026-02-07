@@ -1,27 +1,29 @@
 /**
- * ClubFix API Service - v4.0 (Autenticação Completa)
+ * ClubFix API Service - v5.0 (Multi Base URL + Multi Endpoint)
  * 
- * Testa TODOS os formatos possíveis de autenticação
+ * Testa TODAS as combinações possíveis:
+ * - 5 Base URLs
+ * - 10 Endpoints
+ * - 10 Formatos de autenticação
  */
 
 const axios = require('axios');
 
-class ClubFixServiceV4 {
+class ClubFixServiceV5 {
     constructor() {
-        // Configuração da API
-        this.baseURL = process.env.CLUBFIX_BASE_URL || 'https://clubfix.com.br/webservice';
+        // Credenciais
         this.email = process.env.CLUBFIX_EMAIL || 'kainow@clubfix.com.br';
         this.password = process.env.CLUBFIX_PASSWORD || 'Kainow@27923746';
-        this.clientId = process.env.CLUBFIX_CLIENT_ID;
-        this.clientSecret = process.env.CLUBFIX_CLIENT_SECRET;
+        this.clientId = process.env.CLUBFIX_CLIENT_ID || '2f6356ca-8089-4afc-aad8-c83b30ca1f3f';
+        this.clientSecret = process.env.CLUBFIX_CLIENT_SECRET || 'CLUBFIX6986445f624d31770407007';
         
-        // Token de autenticação
+        // Token
         this.token = {
             accessToken: null,
             expiresAt: null
         };
         
-        // Cache de dados
+        // Cache
         this.cache = {
             brands: null,
             models: {},
@@ -29,225 +31,230 @@ class ClubFixServiceV4 {
             lastUpdate: null
         };
         
-        // Cliente HTTP
-        this.client = axios.create({
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            timeout: 30000
-        });
+        // Base URL que funcionou
+        this.workingBaseURL = null;
+        this.workingMethod = null;
         
-        this.client.defaults.baseURL = this.baseURL;
-        
-        console.log('📱 ClubFix Service v4.0 (Auth Completo) inicializado');
-        console.log('   Base URL:', this.baseURL);
+        console.log('📱 ClubFix Service v5.0 (Multi URL/Endpoint) inicializado');
     }
     
     getInfo() {
         return {
-            baseURL: this.baseURL,
-            email: this.email,
-            authenticated: !!this.token.accessToken,
-            tokenExpires: this.token.expiresAt ? new Date(this.token.expiresAt).toISOString() : null
+            workingBaseURL: this.workingBaseURL,
+            workingMethod: this.workingMethod,
+            authenticated: !!this.token.accessToken
         };
     }
     
     /**
-     * 🔐 AUTENTICAÇÃO - TESTA TODOS OS FORMATOS
+     * 🔐 AUTENTICAÇÃO - TESTA TODAS AS COMBINAÇÕES
      */
     async authenticate() {
         try {
-            console.log('🔐 Autenticando na API ClubFix...');
+            console.log('\n🔐 INICIANDO TESTES DE AUTENTICAÇÃO...');
             console.log('   Email:', this.email);
-            console.log('   Password:', this.password ? '***' : 'FALTANDO');
+            console.log('   Client ID:', this.clientId);
             
-            // Criar X-CREDENTIALS (Base64)
+            // Criar credentials Base64
             const credentials = Buffer.from(`${this.email}:${this.password}`).toString('base64');
             
-            // TESTAR 10 FORMATOS DIFERENTES!
-            const authAttempts = [
-                // 1. POST /auth/login com email/password no body
+            // TESTAR 5 BASE URLs DIFERENTES
+            const baseURLs = [
+                'https://clubfix.com.br/webservice',
+                'https://clubfix.com.br',
+                'https://api.clubfix.com.br',
+                'https://clubfix.com.br/api',
+                'https://homolog.clubfix.com.br/webservice'
+            ];
+            
+            // TESTAR 10 COMBINAÇÕES DE ENDPOINT + FORMATO
+            const authMethods = [
+                // OAuth 2.0 padrão
                 {
-                    name: 'POST /auth/login (body: email/password)',
+                    name: 'OAuth 2.0 Standard',
+                    endpoint: '/oauth/token',
                     method: 'POST',
-                    endpoint: '/auth/login',
-                    headers: {},
-                    body: { 
-                        email: this.email, 
-                        password: this.password 
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: {
+                        grant_type: 'client_credentials',
+                        client_id: this.clientId,
+                        client_secret: this.clientSecret
                     }
                 },
-                // 2. POST /auth/login com X-CREDENTIALS header
+                // OAuth 2.0 JSON
                 {
-                    name: 'POST /auth/login (header: X-CREDENTIALS)',
+                    name: 'OAuth 2.0 JSON',
+                    endpoint: '/oauth/token',
                     method: 'POST',
-                    endpoint: '/auth/login',
-                    headers: { 'X-CREDENTIALS': credentials },
-                    body: {}
-                },
-                // 3. POST /auth/login com username/password
-                {
-                    name: 'POST /auth/login (body: username/password)',
-                    method: 'POST',
-                    endpoint: '/auth/login',
-                    headers: {},
-                    body: { 
-                        username: this.email, 
-                        password: this.password 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: {
+                        grant_type: 'client_credentials',
+                        client_id: this.clientId,
+                        client_secret: this.clientSecret
                     }
                 },
-                // 4. POST /auth/login com login/password
+                // API Reference Auth
                 {
-                    name: 'POST /auth/login (body: login/password)',
-                    method: 'POST',
-                    endpoint: '/auth/login',
-                    headers: {},
-                    body: { 
-                        login: this.email, 
-                        password: this.password 
-                    }
-                },
-                // 5. POST /api-reference/auth com client_id/client_secret
-                {
-                    name: 'POST /api-reference/auth (OAuth)',
-                    method: 'POST',
+                    name: 'API Reference Auth',
                     endpoint: '/api-reference/auth',
+                    method: 'POST',
                     headers: {},
                     body: {
                         client_id: this.clientId,
                         client_secret: this.clientSecret
                     }
                 },
-                // 6. POST /auth/login com credentials no body
+                // Auth Login - Email/Password
                 {
-                    name: 'POST /auth/login (body: credentials base64)',
-                    method: 'POST',
+                    name: 'Auth Login (email/password)',
                     endpoint: '/auth/login',
+                    method: 'POST',
                     headers: {},
-                    body: { 
-                        credentials: credentials 
+                    body: {
+                        email: this.email,
+                        password: this.password
                     }
                 },
-                // 7. POST /login com email/password
+                // Auth Login - X-CREDENTIALS
                 {
-                    name: 'POST /login (body: email/password)',
-                    method: 'POST',
-                    endpoint: '/login',
-                    headers: {},
-                    body: { 
-                        email: this.email, 
-                        password: this.password 
-                    }
-                },
-                // 8. POST /auth/login com Authorization Basic
-                {
-                    name: 'POST /auth/login (Authorization: Basic)',
-                    method: 'POST',
+                    name: 'Auth Login (X-CREDENTIALS)',
                     endpoint: '/auth/login',
-                    headers: { 'Authorization': `Basic ${credentials}` },
+                    method: 'POST',
+                    headers: { 'X-CREDENTIALS': credentials },
                     body: {}
                 },
-                // 9. POST /webservice/auth/login
+                // API Auth
                 {
-                    name: 'POST direto (full URL)',
+                    name: 'API Auth',
+                    endpoint: '/api/auth',
                     method: 'POST',
-                    endpoint: '/auth/login',
                     headers: {},
-                    body: { 
-                        email: this.email, 
-                        password: this.password,
-                        grant_type: 'password'
+                    body: {
+                        client_id: this.clientId,
+                        client_secret: this.clientSecret
                     }
                 },
-                // 10. POST /auth com email/password e client_id
+                // API Login
                 {
-                    name: 'POST /auth (hybrid)',
+                    name: 'API Login',
+                    endpoint: '/api/login',
                     method: 'POST',
-                    endpoint: '/auth',
                     headers: {},
-                    body: { 
-                        email: this.email, 
+                    body: {
+                        email: this.email,
+                        password: this.password
+                    }
+                },
+                // Token endpoint
+                {
+                    name: 'Token Endpoint',
+                    endpoint: '/token',
+                    method: 'POST',
+                    headers: {},
+                    body: {
+                        client_id: this.clientId,
+                        client_secret: this.clientSecret
+                    }
+                },
+                // Authenticate
+                {
+                    name: 'Authenticate',
+                    endpoint: '/authenticate',
+                    method: 'POST',
+                    headers: {},
+                    body: {
+                        email: this.email,
                         password: this.password,
                         client_id: this.clientId,
                         client_secret: this.clientSecret
                     }
+                },
+                // Auth (root)
+                {
+                    name: 'Auth Root',
+                    endpoint: '/auth',
+                    method: 'POST',
+                    headers: {},
+                    body: {
+                        client_id: this.clientId,
+                        client_secret: this.clientSecret,
+                        email: this.email,
+                        password: this.password
+                    }
                 }
             ];
             
-            let response = null;
-            let lastError = null;
-            let workingMethod = null;
+            let successCount = 0;
+            let totalAttempts = baseURLs.length * authMethods.length;
             
-            for (const attempt of authAttempts) {
-                try {
-                    console.log(`\n🔍 Tentando: ${attempt.name}`);
-                    console.log(`   Endpoint: ${attempt.endpoint}`);
-                    console.log(`   Headers:`, Object.keys(attempt.headers).length > 0 ? Object.keys(attempt.headers) : 'Nenhum');
-                    console.log(`   Body:`, Object.keys(attempt.body).length > 0 ? Object.keys(attempt.body) : 'Vazio');
-                    
-                    const config = {
-                        headers: attempt.headers
-                    };
-                    
-                    response = await this.client.post(attempt.endpoint, attempt.body, config);
-                    
-                    console.log(`✅ SUCESSO! Método funcionou: ${attempt.name}`);
-                    console.log(`   Status: ${response.status}`);
-                    console.log(`   Resposta:`, JSON.stringify(response.data).substring(0, 200) + '...');
-                    
-                    workingMethod = attempt.name;
-                    break;
-                } catch (error) {
-                    console.log(`❌ Falhou: ${attempt.name}`);
-                    console.log(`   Status: ${error.response?.status || 'N/A'}`);
-                    console.log(`   Erro: ${error.response?.data?.message || error.message}`);
-                    
-                    lastError = error;
+            console.log(`\n📊 Testando ${baseURLs.length} URLs × ${authMethods.length} métodos = ${totalAttempts} combinações\n`);
+            
+            // Testar todas as combinações
+            for (const baseURL of baseURLs) {
+                console.log(`\n🌐 Testando Base URL: ${baseURL}`);
+                console.log('─'.repeat(80));
+                
+                for (const method of authMethods) {
+                    try {
+                        console.log(`\n🔍 ${++successCount}/${totalAttempts}: ${method.name}`);
+                        console.log(`   Endpoint: ${method.endpoint}`);
+                        console.log(`   Headers:`, Object.keys(method.headers));
+                        console.log(`   Body:`, Object.keys(method.body));
+                        
+                        const client = axios.create({
+                            baseURL: baseURL,
+                            timeout: 10000,
+                            headers: {
+                                'Accept': 'application/json',
+                                ...method.headers
+                            }
+                        });
+                        
+                        const response = await client.post(method.endpoint, method.body);
+                        
+                        console.log(`\n✅ SUCESSO!`);
+                        console.log(`   Base URL: ${baseURL}`);
+                        console.log(`   Método: ${method.name}`);
+                        console.log(`   Status: ${response.status}`);
+                        console.log(`   Resposta:`, JSON.stringify(response.data).substring(0, 200));
+                        
+                        // Extrair token
+                        const { access_token, token, expires_in, data } = response.data;
+                        const authToken = access_token || token || data?.access_token || data?.token;
+                        
+                        if (authToken) {
+                            this.workingBaseURL = baseURL;
+                            this.workingMethod = method.name;
+                            
+                            const expirationTime = expires_in || 3600;
+                            this.token = {
+                                accessToken: authToken,
+                                expiresAt: Date.now() + ((expirationTime - 300) * 1000)
+                            };
+                            
+                            console.log(`\n🎉 AUTENTICAÇÃO BEM-SUCEDIDA!`);
+                            console.log(`   Base URL: ${this.workingBaseURL}`);
+                            console.log(`   Método: ${this.workingMethod}`);
+                            console.log(`   Token: ${authToken.substring(0, 30)}...`);
+                            console.log(`   Expira em: ${expirationTime}s`);
+                            
+                            return true;
+                        }
+                        
+                    } catch (error) {
+                        const status = error.response?.status || 'N/A';
+                        const errorMsg = error.response?.data?.message || error.message;
+                        console.log(`   ❌ Status: ${status} | ${errorMsg}`);
+                    }
                 }
             }
             
-            if (!response) {
-                console.error('\n❌ NENHUM MÉTODO DE AUTENTICAÇÃO FUNCIONOU!');
-                console.error('   Total de tentativas:', authAttempts.length);
-                console.error('   Último erro:', lastError.message);
-                if (lastError.response) {
-                    console.error('   Status:', lastError.response.status);
-                    console.error('   Dados:', JSON.stringify(lastError.response.data));
-                }
-                throw new Error('Falha na autenticação com ClubFix API');
-            }
+            console.log(`\n❌ NENHUMA COMBINAÇÃO FUNCIONOU!`);
+            console.log(`   Total testado: ${totalAttempts}`);
+            throw new Error('Falha na autenticação com ClubFix API');
             
-            // Extrair token da resposta
-            const { access_token, token, expires_in, data } = response.data;
-            const authToken = access_token || token || data?.access_token || data?.token;
-            
-            if (!authToken) {
-                console.error('❌ Token não encontrado na resposta');
-                console.error('   Resposta completa:', JSON.stringify(response.data));
-                throw new Error('Token não retornado pela API ClubFix');
-            }
-            
-            // Calcular expiração
-            const expirationTime = expires_in || 3600;
-            const expiresAt = Date.now() + ((expirationTime - 300) * 1000);
-            
-            this.token = {
-                accessToken: authToken,
-                expiresAt: expiresAt
-            };
-            
-            // Atualizar header
-            this.client.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
-            
-            console.log('\n✅ AUTENTICAÇÃO BEM-SUCEDIDA!');
-            console.log(`   Método usado: ${workingMethod}`);
-            console.log(`   Token: ${authToken.substring(0, 30)}...`);
-            console.log(`   Expira em: ${expirationTime}s`);
-            
-            return true;
         } catch (error) {
-            console.error('\n❌ Erro fatal na autenticação:', error.message);
+            console.error('\n❌ Erro fatal:', error.message);
             throw error;
         }
     }
@@ -262,14 +269,21 @@ class ClubFixServiceV4 {
         try {
             if (this.cache.brands && this.cache.lastUpdate && 
                 (Date.now() - this.cache.lastUpdate < 3600000)) {
-                console.log('📦 Usando marcas do cache');
                 return this.cache.brands;
             }
             
             await this.ensureAuthenticated();
             
-            console.log('📱 Buscando marcas da API...');
-            const response = await this.client.get('/api-reference/devices/brands', {
+            const client = axios.create({
+                baseURL: this.workingBaseURL,
+                headers: {
+                    'Authorization': `Bearer ${this.token.accessToken}`,
+                    'Accept': 'application/json'
+                }
+            });
+            
+            console.log('📱 Buscando marcas...');
+            const response = await client.get('/api-reference/devices/brands', {
                 params: { page, per_page: perPage }
             });
             
@@ -296,47 +310,22 @@ class ClubFixServiceV4 {
             const cacheKey = `${brandId}_${page}_${perPage}`;
             
             if (this.cache.models[cacheKey]) {
-                console.log(`📦 Usando modelos do cache (marca ${brandId})`);
                 return this.cache.models[cacheKey];
             }
             
             await this.ensureAuthenticated();
             
-            console.log(`📱 Buscando modelos da marca ${brandId}...`);
-            
-            const endpoints = [
-                {
-                    url: '/api-reference/devices/models',
-                    params: { brand_id: brandId, page, per_page: perPage }
-                },
-                {
-                    url: '/models',
-                    params: { filter: { brand: brandId }, page, per_page: perPage }
-                },
-                {
-                    url: `/brands/${brandId}`,
-                    params: { include: 'models', page, per_page: perPage }
+            const client = axios.create({
+                baseURL: this.workingBaseURL,
+                headers: {
+                    'Authorization': `Bearer ${this.token.accessToken}`,
+                    'Accept': 'application/json'
                 }
-            ];
+            });
             
-            let response = null;
-            let lastError = null;
-            
-            for (const endpoint of endpoints) {
-                try {
-                    console.log(`🔍 Tentando: ${endpoint.url}`);
-                    response = await this.client.get(endpoint.url, { params: endpoint.params });
-                    console.log(`✅ Endpoint funcionou: ${endpoint.url}`);
-                    break;
-                } catch (error) {
-                    console.log(`❌ Falhou: ${endpoint.url}`);
-                    lastError = error;
-                }
-            }
-            
-            if (!response) {
-                throw lastError;
-            }
+            const response = await client.get('/api-reference/devices/models', {
+                params: { brand_id: brandId, page, per_page: perPage }
+            });
             
             const models = response.data.data.map(model => ({
                 id: model.id,
@@ -362,39 +351,22 @@ class ClubFixServiceV4 {
             
             if (this.cache.plans[cacheKey] && 
                 (Date.now() - this.cache.plans[cacheKey].timestamp < 1800000)) {
-                console.log(`📦 Usando cotação do cache`);
                 return this.cache.plans[cacheKey].data;
             }
             
             await this.ensureAuthenticated();
             
-            console.log(`💰 Buscando cotação...`);
-            
-            const endpoints = [
-                '/quotation',
-                '/api-reference/subscriptions/quotation',
-                '/plans/quotation',
-                '/subscriptions/quotation'
-            ];
-            
-            let response = null;
-            
-            for (const endpoint of endpoints) {
-                try {
-                    console.log(`🔍 Tentando: ${endpoint}`);
-                    response = await this.client.get(endpoint, {
-                        params: { model_id: modelId, is_used: isUsed }
-                    });
-                    console.log(`✅ Endpoint funcionou: ${endpoint}`);
-                    break;
-                } catch (error) {
-                    console.log(`❌ Falhou: ${endpoint}`);
+            const client = axios.create({
+                baseURL: this.workingBaseURL,
+                headers: {
+                    'Authorization': `Bearer ${this.token.accessToken}`,
+                    'Accept': 'application/json'
                 }
-            }
+            });
             
-            if (!response) {
-                throw new Error('Nenhum endpoint de cotação funcionou');
-            }
+            const response = await client.get('/api-reference/subscriptions/quotation', {
+                params: { model_id: modelId, is_used: isUsed }
+            });
             
             const quotationData = response.data.data;
             
@@ -436,10 +408,9 @@ class ClubFixServiceV4 {
             plans: {},
             lastUpdate: null
         };
-        console.log('✅ Cache limpo');
     }
 }
 
-const clubfixService = new ClubFixServiceV4();
+const clubfixService = new ClubFixServiceV5();
 
 module.exports = clubfixService;
