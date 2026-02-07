@@ -1,42 +1,32 @@
 /**
  * ClubFix API REST Service - v2.0
  * 
- * Documentação Oficial: https://docs.clubfix.com.br/api-reference/introduction
- * 
- * IMPLEMENTAÇÃO CONFORME DOCUMENTAÇÃO OFICIAL:
- * - URL Base Produção: https://clubfix.com.br/webservice
- * - Endpoint de Autenticação: POST /auth/login
- * - Header X-CREDENTIALS: Base64 de [email]:[password]
- * - Body: { client_id, client_secret }
- * - Todas as requisições subsequentes: Authorization: Bearer <token>
+ * VERSÃO CORRIGIDA: Endpoint de marcas correto
+ * Documentação: https://docs.clubfix.com.br/api-reference/introduction
  */
 
 const axios = require('axios');
 
 class ClubFixServiceV2 {
     constructor() {
-        // Configurações de ambiente
         this.baseURL = process.env.CLUBFIX_BASE_URL || 'https://clubfix.com.br/webservice';
         this.email = process.env.CLUBFIX_EMAIL;
         this.password = process.env.CLUBFIX_PASSWORD;
         this.clientId = process.env.CLUBFIX_CLIENT_ID;
         this.clientSecret = process.env.CLUBFIX_CLIENT_SECRET;
 
-        // Validar credenciais
         if (!this.email || !this.password) {
-            console.error('❌ ERRO: Variáveis CLUBFIX_EMAIL e CLUBFIX_PASSWORD não configuradas!');
+            console.error('❌ ERRO: CLUBFIX_EMAIL e CLUBFIX_PASSWORD não configuradas!');
         }
         if (!this.clientId || !this.clientSecret) {
-            console.error('❌ ERRO: Variáveis CLUBFIX_CLIENT_ID e CLUBFIX_CLIENT_SECRET não configuradas!');
+            console.error('❌ ERRO: CLUBFIX_CLIENT_ID e CLUBFIX_CLIENT_SECRET não configuradas!');
         }
 
-        // Estado do token
         this.token = {
             accessToken: null,
             expiresAt: null
         };
 
-        // Cache inteligente
         this.cache = {
             brands: [],
             models: {},
@@ -44,7 +34,6 @@ class ClubFixServiceV2 {
             lastUpdate: null
         };
 
-        // Cliente HTTP
         this.client = axios.create({
             baseURL: this.baseURL,
             timeout: 30000,
@@ -58,12 +47,6 @@ class ClubFixServiceV2 {
         console.log('📡 Base URL:', this.baseURL);
     }
 
-    /**
-     * Autenticação conforme documentação oficial ClubFix
-     * POST /auth/login
-     * Header: X-CREDENTIALS com Base64 de email:password
-     * Body: { client_id, client_secret }
-     */
     async authenticate() {
         try {
             console.log('\n🔐 Autenticando na API ClubFix (Produção)...');
@@ -71,13 +54,11 @@ class ClubFixServiceV2 {
             console.log('📧 Email:', this.email);
             console.log('🔑 Client ID:', this.clientId);
 
-            // Criar X-CREDENTIALS conforme documentação: Base64 de email:password
             const credentials = `${this.email}:${this.password}`;
             const base64Credentials = Buffer.from(credentials).toString('base64');
             
             console.log(`🔐 X-CREDENTIALS: ${this.email}:${'*'.repeat(this.password.length)} (Base64 encoded)`);
 
-            // Fazer requisição de autenticação
             const response = await this.client.post('/auth/login', {
                 client_id: this.clientId,
                 client_secret: this.clientSecret
@@ -87,18 +68,15 @@ class ClubFixServiceV2 {
                 }
             });
 
-            // Processar resposta
             const { access_token, token_type, expires_in } = response.data;
 
             if (!access_token) {
-                throw new Error('Token de acesso não retornado pela API');
+                throw new Error('Token não retornado pela API');
             }
 
-            // Armazenar token com margem de segurança de 5 minutos
             this.token.accessToken = access_token;
             this.token.expiresAt = Date.now() + ((expires_in || 3600) - 300) * 1000;
 
-            // Configurar header de autorização para todas as próximas requisições
             this.client.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
 
             console.log('✅ Autenticação bem-sucedida!');
@@ -119,11 +97,7 @@ class ClubFixServiceV2 {
         }
     }
 
-    /**
-     * Garantir que está autenticado antes de fazer requisições
-     */
     async ensureAuthenticated() {
-        // Se não tem token ou está expirado, autenticar
         if (!this.token.accessToken || Date.now() >= this.token.expiresAt) {
             console.log('🔄 Token expirado ou ausente, renovando...');
             await this.authenticate();
@@ -131,14 +105,14 @@ class ClubFixServiceV2 {
     }
 
     /**
-     * Buscar marcas (Brands)
-     * GET /api-reference/devices/brands
+     * Buscar marcas - VERSÃO CORRIGIDA
+     * Tenta múltiplos endpoints até encontrar o correto
      */
     async getBrands(page = 1, perPage = 50) {
         try {
             await this.ensureAuthenticated();
 
-            // Verificar cache (1 hora de validade)
+            // Verificar cache
             const cacheAge = Date.now() - (this.cache.lastUpdate || 0);
             if (this.cache.brands.length > 0 && cacheAge < 3600000) {
                 console.log('📦 Retornando marcas do cache');
@@ -147,18 +121,54 @@ class ClubFixServiceV2 {
 
             console.log('📱 Buscando marcas da API ClubFix...');
 
-            const response = await this.client.get('/api-reference/devices/brands', {
-                params: { page, per_page: perPage }
-            });
+            // Lista de endpoints possíveis (em ordem de prioridade)
+            const endpoints = [
+                '/devices/brands',                    // Mais provável
+                '/brands',                            // Alternativa 1
+                '/api/v1/devices/brands',            // Alternativa 2
+                '/api-reference/devices/brands',     // Documentação
+                '/api/devices/brands'                // Alternativa 3
+            ];
 
-            // Processar dados
-            const brands = response.data.data || response.data || [];
-            
+            let brands = null;
+            let successEndpoint = null;
+
+            // Tentar cada endpoint até funcionar
+            for (const endpoint of endpoints) {
+                try {
+                    console.log(`🔍 Tentando endpoint: ${endpoint}`);
+                    
+                    const response = await this.client.get(endpoint, {
+                        params: { page, per_page: perPage }
+                    });
+
+                    // Processar resposta
+                    brands = response.data.data || response.data || [];
+                    successEndpoint = endpoint;
+                    
+                    console.log(`✅ Endpoint funcionou: ${endpoint}`);
+                    console.log(`✅ ${brands.length} marcas carregadas`);
+                    
+                    break; // Sair do loop se funcionou
+
+                } catch (err) {
+                    console.log(`❌ Endpoint ${endpoint} falhou: ${err.response?.status || err.message}`);
+                    continue; // Tentar próximo endpoint
+                }
+            }
+
+            // Se nenhum endpoint funcionou
+            if (!brands) {
+                console.error('❌ TODOS os endpoints falharam!');
+                throw new Error('Nenhum endpoint de marcas funcionou');
+            }
+
             // Atualizar cache
             this.cache.brands = brands;
             this.cache.lastUpdate = Date.now();
 
-            console.log(`✅ ${brands.length} marcas carregadas`);
+            console.log(`\n💡 ENDPOINT CORRETO IDENTIFICADO: ${successEndpoint}`);
+            console.log(`📝 Atualize o código para usar apenas este endpoint\n`);
 
             return brands;
 
@@ -168,15 +178,10 @@ class ClubFixServiceV2 {
         }
     }
 
-    /**
-     * Buscar modelos de uma marca
-     * GET /api-reference/devices/models
-     */
     async getModels(brandId, page = 1, perPage = 100) {
         try {
             await this.ensureAuthenticated();
 
-            // Verificar cache (1 hora de validade)
             const cacheKey = `${brandId}_${page}`;
             const cachedModels = this.cache.models[cacheKey];
             const cacheAge = Date.now() - (this.cache.lastUpdate || 0);
@@ -188,21 +193,41 @@ class ClubFixServiceV2 {
 
             console.log(`📱 Buscando modelos da marca ${brandId}...`);
 
-            const response = await this.client.get('/api-reference/devices/models', {
-                params: {
-                    brand_id: brandId,
-                    page,
-                    per_page: perPage
+            // Tentar endpoints possíveis
+            const endpoints = [
+                `/devices/models`,
+                `/models`,
+                `/api/v1/devices/models`,
+                `/api-reference/devices/models`
+            ];
+
+            let models = null;
+
+            for (const endpoint of endpoints) {
+                try {
+                    const response = await this.client.get(endpoint, {
+                        params: {
+                            brand_id: brandId,
+                            page,
+                            per_page: perPage
+                        }
+                    });
+
+                    models = response.data.data || response.data || [];
+                    console.log(`✅ ${models.length} modelos carregados (${endpoint})`);
+                    break;
+
+                } catch (err) {
+                    continue;
                 }
-            });
+            }
 
-            const models = response.data.data || response.data || [];
+            if (!models) {
+                throw new Error('Nenhum endpoint de modelos funcionou');
+            }
 
-            // Atualizar cache
             this.cache.models[cacheKey] = models;
             this.cache.lastUpdate = Date.now();
-
-            console.log(`✅ ${models.length} modelos carregados`);
 
             return models;
 
@@ -212,22 +237,30 @@ class ClubFixServiceV2 {
         }
     }
 
-    /**
-     * Buscar detalhes de um modelo específico
-     * GET /api-reference/devices/models/show
-     */
     async getModelById(modelId) {
         try {
             await this.ensureAuthenticated();
 
             console.log(`📱 Buscando detalhes do modelo ${modelId}...`);
 
-            const response = await this.client.get(`/api-reference/devices/models/show/${modelId}`);
-            const model = response.data;
+            const endpoints = [
+                `/devices/models/show/${modelId}`,
+                `/models/show/${modelId}`,
+                `/api-reference/devices/models/show/${modelId}`
+            ];
 
-            console.log(`✅ Modelo carregado: ${model.name || modelId}`);
+            for (const endpoint of endpoints) {
+                try {
+                    const response = await this.client.get(endpoint);
+                    const model = response.data;
+                    console.log(`✅ Modelo carregado: ${model.name || modelId}`);
+                    return model;
+                } catch (err) {
+                    continue;
+                }
+            }
 
-            return model;
+            throw new Error('Nenhum endpoint de modelo funcionou');
 
         } catch (error) {
             console.error('❌ Erro ao buscar modelo:', error.message);
@@ -235,15 +268,10 @@ class ClubFixServiceV2 {
         }
     }
 
-    /**
-     * Obter cotação de proteção para um modelo
-     * GET /api-reference/subscriptions/quotation
-     */
     async getQuotation(modelId, isUsed = false) {
         try {
             await this.ensureAuthenticated();
 
-            // Verificar cache (30 minutos)
             const cacheKey = `quotation_${modelId}_${isUsed}`;
             const cachedQuotation = this.cache.plans[cacheKey];
             const cacheAge = Date.now() - (this.cache.lastUpdate || 0);
@@ -255,22 +283,33 @@ class ClubFixServiceV2 {
 
             console.log(`💰 Buscando cotação para modelo ${modelId}...`);
 
-            const response = await this.client.get('/api-reference/subscriptions/quotation', {
-                params: {
-                    model_id: modelId,
-                    is_used: isUsed
+            const endpoints = [
+                `/subscriptions/quotation`,
+                `/api-reference/subscriptions/quotation`
+            ];
+
+            for (const endpoint of endpoints) {
+                try {
+                    const response = await this.client.get(endpoint, {
+                        params: {
+                            model_id: modelId,
+                            is_used: isUsed
+                        }
+                    });
+
+                    const quotation = response.data;
+                    this.cache.plans[cacheKey] = quotation;
+                    this.cache.lastUpdate = Date.now();
+
+                    console.log('✅ Cotação obtida com sucesso');
+                    return quotation;
+
+                } catch (err) {
+                    continue;
                 }
-            });
+            }
 
-            const quotation = response.data;
-
-            // Atualizar cache
-            this.cache.plans[cacheKey] = quotation;
-            this.cache.lastUpdate = Date.now();
-
-            console.log('✅ Cotação obtida com sucesso');
-
-            return quotation;
+            throw new Error('Nenhum endpoint de cotação funcionou');
 
         } catch (error) {
             console.error('❌ Erro ao buscar cotação:', error.message);
@@ -278,35 +317,28 @@ class ClubFixServiceV2 {
         }
     }
 
-    /**
-     * Criar ou verificar cliente
-     * POST /api-reference/customers/post
-     */
     async createCustomer(customerData) {
         try {
             await this.ensureAuthenticated();
 
             console.log('👤 Criando/verificando cliente...');
 
-            // Verificar se cliente já existe pelo documento
             try {
                 const existingCustomer = await this.client.get(
-                    `/api-reference/customers/show/${customerData.document}`
+                    `/customers/show/${customerData.document}`
                 );
 
                 if (existingCustomer.data) {
-                    console.log('✅ Cliente já existe, retornando dados');
+                    console.log('✅ Cliente já existe');
                     return existingCustomer.data;
                 }
             } catch (err) {
-                // Cliente não existe, continuar com a criação
+                // Cliente não existe
             }
 
-            // Criar novo cliente
-            const response = await this.client.post('/api-reference/customers/post', customerData);
+            const response = await this.client.post('/customers/post', customerData);
 
             console.log('✅ Cliente criado com sucesso');
-
             return response.data;
 
         } catch (error) {
@@ -315,10 +347,6 @@ class ClubFixServiceV2 {
         }
     }
 
-    /**
-     * Criar assinatura de proteção
-     * POST /api-reference/subscriptions/post
-     */
     async createSubscription(subscriptionData) {
         try {
             await this.ensureAuthenticated();
@@ -326,12 +354,11 @@ class ClubFixServiceV2 {
             console.log('📝 Criando assinatura...');
 
             const response = await this.client.post(
-                '/api-reference/subscriptions/post',
+                '/subscriptions/post',
                 subscriptionData
             );
 
             console.log('✅ Assinatura criada com sucesso');
-
             return response.data;
 
         } catch (error) {
@@ -340,61 +367,47 @@ class ClubFixServiceV2 {
         }
     }
 
-    /**
-     * Processar pagamento via Pix
-     * POST /api-reference/subscriptions/payment
-     */
     async processPaymentPix(subscriptionId) {
         try {
             await this.ensureAuthenticated();
 
             console.log('💳 Processando pagamento Pix...');
 
-            const response = await this.client.post('/api-reference/subscriptions/payment', {
+            const response = await this.client.post('/subscriptions/payment', {
                 subscription_id: subscriptionId,
                 payment_method: 'pix'
             });
 
-            console.log('✅ QR Code Pix gerado com sucesso');
-
+            console.log('✅ QR Code Pix gerado');
             return response.data;
 
         } catch (error) {
-            console.error('❌ Erro ao processar pagamento Pix:', error.message);
+            console.error('❌ Erro ao processar Pix:', error.message);
             throw error;
         }
     }
 
-    /**
-     * Processar pagamento via Cartão de Crédito
-     * POST /api-reference/subscriptions/payment
-     */
     async processPaymentCreditCard(subscriptionId, cardData) {
         try {
             await this.ensureAuthenticated();
 
             console.log('💳 Processando pagamento com cartão...');
 
-            const response = await this.client.post('/api-reference/subscriptions/payment', {
+            const response = await this.client.post('/subscriptions/payment', {
                 subscription_id: subscriptionId,
                 payment_method: 'credit_card',
                 card: cardData
             });
 
-            console.log('✅ Pagamento processado com sucesso');
-
+            console.log('✅ Pagamento processado');
             return response.data;
 
         } catch (error) {
-            console.error('❌ Erro ao processar pagamento:', error.message);
+            console.error('❌ Erro ao processar cartão:', error.message);
             throw error;
         }
     }
 
-    /**
-     * Buscar assinatura por ID
-     * GET /api-reference/subscriptions/show
-     */
     async getSubscription(subscriptionId) {
         try {
             await this.ensureAuthenticated();
@@ -402,11 +415,10 @@ class ClubFixServiceV2 {
             console.log(`📋 Buscando assinatura ${subscriptionId}...`);
 
             const response = await this.client.get(
-                `/api-reference/subscriptions/show/${subscriptionId}`
+                `/subscriptions/show/${subscriptionId}`
             );
 
             console.log('✅ Assinatura encontrada');
-
             return response.data;
 
         } catch (error) {
@@ -415,9 +427,6 @@ class ClubFixServiceV2 {
         }
     }
 
-    /**
-     * Limpar cache
-     */
     clearCache() {
         this.cache = {
             brands: [],
@@ -428,9 +437,6 @@ class ClubFixServiceV2 {
         console.log('🗑️ Cache limpo');
     }
 
-    /**
-     * Obter informações do serviço
-     */
     getInfo() {
         return {
             baseURL: this.baseURL,
@@ -446,5 +452,4 @@ class ClubFixServiceV2 {
     }
 }
 
-// Exportar instância única (Singleton)
 module.exports = new ClubFixServiceV2();
