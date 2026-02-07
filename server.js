@@ -384,41 +384,63 @@ app.get('/api/clubfix/models/:brandId', async (req, res) => {
     }
     
     log(`🔍 Cache MISS: Buscando modelos da marca ${brandId} na API...`);
-    log(`🌐 URL completa: ${CLUBFIX_CONFIG.baseURL}/brands/${brandId}`);
     
-    const response = await makeAuthenticatedRequest('GET', `/brands/${brandId}`);
-    
-    log(`📡 Resposta recebida da API ClubFix`);
-    log(`📊 Status: ${response.status}`);
-    log(`📦 Estrutura da resposta: ${JSON.stringify(Object.keys(response.data))}`);
-    
-    // Testar múltiplos formatos de resposta
     let models = [];
+    let attemptNumber = 1;
     
-    // Formato 1: response.data.data.models
-    if (response.data?.data?.models) {
-      models = response.data.data.models;
-      log(`✅ Formato 1: response.data.data.models (${models.length} modelos)`);
+    // TENTATIVA 1: /brands/{id}/models
+    try {
+      log(`🔄 Tentativa ${attemptNumber}: GET /brands/${brandId}/models`);
+      const response1 = await makeAuthenticatedRequest('GET', `/brands/${brandId}/models`);
+      log(`📊 Status: ${response1.status}`);
+      log(`📦 Estrutura: ${JSON.stringify(Object.keys(response1.data))}`);
+      
+      if (response1.data?.data && Array.isArray(response1.data.data)) {
+        models = response1.data.data;
+        log(`✅ SUCESSO Tentativa ${attemptNumber}: ${models.length} modelos em response.data.data`);
+      } else if (Array.isArray(response1.data)) {
+        models = response1.data;
+        log(`✅ SUCESSO Tentativa ${attemptNumber}: ${models.length} modelos em response.data`);
+      }
+    } catch (error) {
+      log(`❌ Tentativa ${attemptNumber} FALHOU: ${error.response?.status || error.message}`);
     }
-    // Formato 2: response.data.models
-    else if (response.data?.models) {
-      models = response.data.models;
-      log(`✅ Formato 2: response.data.models (${models.length} modelos)`);
+    
+    // TENTATIVA 2: /models?brand_id={id}
+    if (models.length === 0) {
+      attemptNumber++;
+      try {
+        log(`🔄 Tentativa ${attemptNumber}: GET /models?brand_id=${brandId}`);
+        const response2 = await makeAuthenticatedRequest('GET', '/models', null, { brand_id: brandId });
+        log(`📊 Status: ${response2.status}`);
+        log(`📦 Estrutura: ${JSON.stringify(Object.keys(response2.data))}`);
+        
+        if (response2.data?.data && Array.isArray(response2.data.data)) {
+          models = response2.data.data;
+          log(`✅ SUCESSO Tentativa ${attemptNumber}: ${models.length} modelos em response.data.data`);
+        } else if (Array.isArray(response2.data)) {
+          models = response2.data;
+          log(`✅ SUCESSO Tentativa ${attemptNumber}: ${models.length} modelos em response.data`);
+        }
+      } catch (error) {
+        log(`❌ Tentativa ${attemptNumber} FALHOU: ${error.response?.status || error.message}`);
+      }
     }
-    // Formato 3: response.data (array direto)
-    else if (Array.isArray(response.data)) {
-      models = response.data;
-      log(`✅ Formato 3: response.data (array direto, ${models.length} modelos)`);
+    
+    // TENTATIVA 3: /brands/{id} (formato antigo - já sabemos que não funciona)
+    if (models.length === 0) {
+      attemptNumber++;
+      log(`🔄 Tentativa ${attemptNumber}: GET /brands/${brandId} (fallback)`);
+      const response3 = await makeAuthenticatedRequest('GET', `/brands/${brandId}`);
+      log(`📊 Status: ${response3.status}`);
+      log(`📦 Estrutura: ${JSON.stringify(Object.keys(response3.data))}`);
+      log(`❌ Endpoint /brands/${brandId} não retorna modelos (esperado)`);
     }
-    // Formato 4: response.data.data (array direto)
-    else if (Array.isArray(response.data?.data)) {
-      models = response.data.data;
-      log(`✅ Formato 4: response.data.data (array direto, ${models.length} modelos)`);
-    }
-    // Não encontrou
-    else {
-      log(`❌ NENHUM FORMATO RECONHECIDO!`, 'error');
-      log(`📦 response.data completo: ${JSON.stringify(response.data).substring(0, 500)}`, 'error');
+    
+    // Se nenhuma tentativa funcionou
+    if (models.length === 0) {
+      log(`❌ TODAS AS ${attemptNumber} TENTATIVAS FALHARAM!`, 'error');
+      log(`📞 Contate TI ClubFix para saber o endpoint correto de modelos`, 'error');
     }
     
     log(`📱 API retornou ${models.length} modelos para marca ${brandId}`);
@@ -576,7 +598,7 @@ app.post('/api/cache/clear', (req, res) => {
 
 app.listen(PORT, async () => {
   console.log('='.repeat(60));
-  console.log('==> 🏆 BACKEND PROTEGMAIS - VERSÃO 18.3.2 - MULTI-FORMAT FIX');
+  console.log('==> 🏆 BACKEND PROTEGMAIS - VERSÃO 18.3.3 - ENDPOINT CORRETO');
   console.log('='.repeat(60));
   console.log(`==> Porta: ${PORT}`);
   console.log(`==> URL Pública: https://protegmais.onrender.com`);
