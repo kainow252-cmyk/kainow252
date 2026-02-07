@@ -37,13 +37,15 @@ class ClubFixServiceV2 {
         
         // Cliente HTTP
         this.client = axios.create({
-            baseURL: this.baseURL,
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             },
             timeout: 30000
         });
+        
+        // Configurar baseURL após criar a instância
+        this.client.defaults.baseURL = this.baseURL;
         
         console.log('📱 ClubFix Service v2.0 inicializado');
         console.log('   Base URL:', this.baseURL);
@@ -151,6 +153,7 @@ class ClubFixServiceV2 {
      */
     async ensureAuthenticated() {
         if (!this.token.accessToken || Date.now() >= this.token.expiresAt) {
+            console.log('🔄 Token expirado, renovando...');
             await this.authenticate();
         }
     }
@@ -571,23 +574,9 @@ class ClubFixServiceV2 {
             throw error;
         }
     }
-    
-    /**
-     * 🗑️ LIMPAR CACHE
-     */
-    clearCache() {
-        console.log('🗑️ Limpando cache...');
-        this.cache = {
-            brands: null,
-            models: {},
-            plans: {},
-            lastUpdate: null
-        };
-        console.log('✅ Cache limpo');
-    }
 }
 
-// Singleton
+// Criar instância única (Singleton)
 const clubfixService = new ClubFixServiceV2();
 
 module.exports = clubfixService;
