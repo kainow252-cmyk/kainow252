@@ -507,6 +507,84 @@ class ClubFixServiceV2 {
     }
 
     /**
+     * PROCESSAR PAGAMENTO PIX
+     * Endpoint: POST /api-reference/subscriptions/payment
+     */
+    async processPaymentPix(subscriptionId) {
+        await this.ensureAuthenticated();
+
+        if (!subscriptionId) {
+            throw new Error('subscriptionId é obrigatório');
+        }
+
+        try {
+            console.log(`💳 Gerando pagamento PIX para assinatura ${subscriptionId}...`);
+            
+            const response = await this.client.post('/api-reference/subscriptions/payment', {
+                subscription_id: subscriptionId,
+                payment_method: 'pix'
+            });
+
+            const payment = response.data?.data || response.data;
+            
+            console.log('✅ QR Code PIX gerado com sucesso');
+            
+            return payment;
+
+        } catch (error) {
+            console.error('❌ Erro ao gerar pagamento PIX:');
+            console.error(`Status: ${error.response?.status}`);
+            console.error(`Erro: ${error.response?.data?.message || error.message}`);
+            
+            throw new Error('Falha ao gerar pagamento PIX');
+        }
+    }
+
+    /**
+     * PROCESSAR PAGAMENTO CARTÃO
+     * Endpoint: POST /api-reference/subscriptions/payment
+     */
+    async processPaymentCreditCard(subscriptionId, cardData) {
+        await this.ensureAuthenticated();
+
+        if (!subscriptionId) {
+            throw new Error('subscriptionId é obrigatório');
+        }
+
+        if (!cardData || !cardData.number || !cardData.holder || !cardData.expiry || !cardData.cvv) {
+            throw new Error('Dados do cartão incompletos');
+        }
+
+        try {
+            console.log(`💳 Processando pagamento com cartão para assinatura ${subscriptionId}...`);
+            
+            const response = await this.client.post('/api-reference/subscriptions/payment', {
+                subscription_id: subscriptionId,
+                payment_method: 'credit_card',
+                card: {
+                    number: cardData.number,
+                    holder: cardData.holder,
+                    expiry: cardData.expiry,
+                    cvv: cardData.cvv
+                }
+            });
+
+            const payment = response.data?.data || response.data;
+            
+            console.log('✅ Pagamento com cartão processado com sucesso');
+            
+            return payment;
+
+        } catch (error) {
+            console.error('❌ Erro ao processar pagamento com cartão:');
+            console.error(`Status: ${error.response?.status}`);
+            console.error(`Erro: ${error.response?.data?.message || error.message}`);
+            
+            throw new Error('Falha ao processar pagamento com cartão');
+        }
+    }
+
+    /**
      * Limpar cache
      */
     clearCache() {
