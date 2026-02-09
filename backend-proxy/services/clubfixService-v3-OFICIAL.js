@@ -97,4 +97,3 @@
     97	            
     98	            console.log('📝 POST /auth/login');
     99	            console.log(`X-CREDENTIALS: ${credentials.substring(0, 20)}...`);
-   100	
