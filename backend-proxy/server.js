@@ -1,13 +1,6 @@
 /**
  * ProtegMais Backend v2.0
  * API REST para integração com ClubFix
- * 
- * Features:
- * - OAuth 2.0 Authentication
- * - RESTful API endpoints
- * - CORS habilitado
- * - Logs detalhados
- * - Health check
  */
 
 require('dotenv').config();
@@ -59,12 +52,48 @@ app.get('/health', (req, res) => {
 // ROTAS CLUBFIX API v2.0
 // ===================================
 
+console.log('🔍 Tentando carregar rotas ClubFix...');
+console.log('📁 Caminho atual:', __dirname);
+console.log('📁 Arquivo de rotas:', __dirname + '/routes/clubfix-v2.js');
+
+let clubfixRoutesLoaded = false;
+
 try {
+    // Tentar caminho relativo padrão
     const clubfixRoutes = require('./routes/clubfix-v2');
     app.use('/api/clubfix', clubfixRoutes);
-    console.log('✅ ClubFix routes carregadas');
+    clubfixRoutesLoaded = true;
+    console.log('✅ ClubFix routes carregadas com sucesso!');
 } catch (error) {
-    console.error('❌ ClubFix routes nao encontradas:', error.message);
+    console.error('❌ ERRO ao carregar rotas ClubFix:');
+    console.error('   Mensagem:', error.message);
+    console.error('   Stack:', error.stack);
+    
+    // Tentar verificar se os arquivos existem
+    const fs = require('fs');
+    const path = require('path');
+    
+    console.log('\n🔍 Verificando arquivos:');
+    
+    const routesPath = path.join(__dirname, 'routes', 'clubfix-v2.js');
+    console.log('   Routes existe?', fs.existsSync(routesPath), '->', routesPath);
+    
+    const servicesPath = path.join(__dirname, 'services', 'clubfixService-v2.js');
+    console.log('   Service existe?', fs.existsSync(servicesPath), '->', servicesPath);
+    
+    if (fs.existsSync(__dirname + '/routes')) {
+        console.log('\n📁 Arquivos em /routes:');
+        fs.readdirSync(__dirname + '/routes').forEach(file => {
+            console.log('   -', file);
+        });
+    }
+    
+    if (fs.existsSync(__dirname + '/services')) {
+        console.log('\n📁 Arquivos em /services:');
+        fs.readdirSync(__dirname + '/services').forEach(file => {
+            console.log('   -', file);
+        });
+    }
 }
 
 // ===================================
@@ -76,7 +105,8 @@ app.get('/', (req, res) => {
         service: 'ProtegMais Backend v2.0',
         version: '2.0.0',
         documentation: 'https://docs.clubfix.com.br/api-reference/introduction',
-        endpoints: {
+        routes_loaded: clubfixRoutesLoaded,
+        endpoints: clubfixRoutesLoaded ? {
             health: '/health',
             brands: '/api/clubfix/brands',
             models: '/api/clubfix/models/:brandId',
@@ -85,7 +115,7 @@ app.get('/', (req, res) => {
             subscriptions: '/api/clubfix/subscriptions',
             payment_pix: '/api/clubfix/payment/pix',
             payment_card: '/api/clubfix/payment/credit-card'
-        }
+        } : 'Rotas não carregadas - verifique os logs'
     });
 });
 
@@ -98,7 +128,10 @@ app.use((req, res) => {
         error: 'Endpoint não encontrado',
         path: req.path,
         method: req.method,
-        message: 'Verifique a documentação em /health'
+        routes_loaded: clubfixRoutesLoaded,
+        message: clubfixRoutesLoaded 
+            ? 'Verifique a documentação em /health' 
+            : 'As rotas ClubFix não foram carregadas. Verifique os logs do servidor.'
     });
 });
 
@@ -127,22 +160,30 @@ app.listen(PORT, () => {
     console.log('  ✅ ProtegMais Backend v2.0 (API REST ClubFix)');
     console.log('═══════════════════════════════════════════════════════════');
     console.log(`  🌐 Servidor rodando em: http://localhost:${PORT}`);
-    console.log(`  📡 Rotas ClubFix v2.0: CARREGADAS`);
+    console.log(`  📡 Rotas ClubFix v2.0: ${clubfixRoutesLoaded ? '✅ CARREGADAS' : '❌ NÃO CARREGADAS'}`);
     console.log(`  🔐 OAuth 2.0: ${process.env.CLUBFIX_CLIENT_ID ? '✅ CONFIGURADO' : '❌ NÃO CONFIGURADO'}`);
     console.log(`  🌍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
     console.log(`  🔗 Base URL ClubFix: ${process.env.CLUBFIX_BASE_URL || 'NÃO CONFIGURADO'}`);
     console.log('═══════════════════════════════════════════════════════════');
-    console.log('');
-    console.log('📋 Endpoints disponíveis:');
-    console.log('  GET    /health');
-    console.log('  GET    /api/clubfix/brands');
-    console.log('  GET    /api/clubfix/models/:brandId');
-    console.log('  GET    /api/clubfix/quotation');
-    console.log('  POST   /api/clubfix/customers');
-    console.log('  POST   /api/clubfix/subscriptions');
-    console.log('  POST   /api/clubfix/payment/pix');
-    console.log('  POST   /api/clubfix/payment/credit-card');
-    console.log('  POST   /api/cache/clear');
+    
+    if (clubfixRoutesLoaded) {
+        console.log('');
+        console.log('📋 Endpoints disponíveis:');
+        console.log('  GET    /health');
+        console.log('  GET    /api/clubfix/brands');
+        console.log('  GET    /api/clubfix/models/:brandId');
+        console.log('  GET    /api/clubfix/quotation');
+        console.log('  POST   /api/clubfix/customers');
+        console.log('  POST   /api/clubfix/subscriptions');
+        console.log('  POST   /api/clubfix/payment/pix');
+        console.log('  POST   /api/clubfix/payment/credit-card');
+        console.log('  POST   /api/cache/clear');
+    } else {
+        console.log('');
+        console.log('⚠️  ATENÇÃO: Rotas ClubFix NÃO foram carregadas!');
+        console.log('   Verifique os logs acima para detalhes do erro.');
+    }
+    
     console.log('═══════════════════════════════════════════════════════════');
     console.log('');
     
